@@ -1,0 +1,5 @@
+{
+  "name": "dockerlab",
+  "private": true,
+  "type": "module"
+}

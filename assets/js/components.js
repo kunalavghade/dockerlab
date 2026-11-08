@@ -119,6 +119,10 @@ export const fileBlock = (spec) => {
 };
 
 // ---------- Scene frame for animations ----------
+// Typed input is normalised: no leading "$", single spaces, lowercase.
+const normalise = (s) => String(s || '').trim().replace(/^\$\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+const toPattern = (p) => (p instanceof RegExp ? p : new RegExp(`^${normalise(p).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+
 /**
  * Creates the standard animation frame and returns helpers.
  * btn(label, fn, { enabled }) — buttons auto-disable while an action runs and
@@ -128,27 +132,86 @@ export const scene = (root, { title, hint = '' }) => {
   const stage = h('div', { class: 'stage' });
   const controls = h('div', { class: 'controls' });
   const cap = h('div', { class: 'caption', 'aria-live': 'polite', html: hint });
+
+  // Typed-command terminal: hidden until the scene registers its first command.
+  const input = h('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Type a command', placeholder: 'Type a command and press Enter…' });
+  const term = h('form', { class: 'scene-cmd', style: { display: 'none' } },
+    h('span', { class: 'p' }, '$'), input, h('button', { class: 'btn btn-sm btn-primary', type: 'submit' }, 'Run ↵'));
+  const hints = h('div', { class: 'cmd-hints', style: { display: 'none' } });
+
   root.append(h('div', { class: 'scene' },
     h('div', { class: 'scene-head' }, h('span', { class: 'scene-dot' }), title, h('span', { class: 'scene-tag' }, 'Interactive')),
-    stage, controls, cap,
+    stage, term, hints, controls, cap,
   ));
 
   let busy = false;
   const buttons = [];
-  const refresh = () => buttons.forEach(({ b, enabled }) => { b.disabled = busy || (enabled ? !enabled() : false); });
+  const commands = []; // { patterns: RegExp[], fn, enabled, example }
+  const typedHistory = [];
+  let hIdx = 0;
+
+  const isOn = (enabled) => (enabled ? enabled() : true);
+  const renderHints = () => {
+    if (!commands.length) return;
+    const live = commands.filter((c) => c.example && isOn(c.enabled)).slice(0, 6);
+    hints.replaceChildren(h('span', {}, 'Try typing:'),
+      ...live.map((c) => h('button', { type: 'button', class: 'hint', onclick: () => { input.value = c.example; input.focus(); } }, c.example)));
+  };
+  const refresh = () => {
+    buttons.forEach(({ b, enabled }) => { b.disabled = busy || !isOn(enabled); });
+    renderHints();
+  };
 
   const api = {
     stage, controls, refresh,
     say: (html) => { cap.innerHTML = html; },
     sep: () => controls.append(h('span', { class: 'sep' })),
     add: (...els) => controls.append(...els),
-    btn(label, fn, { primary = false, mono = false, enabled } = {}) {
+    /**
+     * Register a typed command. patterns: string (exact, case/space-insensitive) or RegExp,
+     * tested against the normalised input. fn(button|null, match) runs like a button click.
+     */
+    command(patterns, fn, { enabled, example, button = null, why } = {}) {
+      const list = [].concat(patterns).map(toPattern);
+      const ex = example ?? [].concat(patterns).find((p) => typeof p === 'string');
+      commands.push({ patterns: list, fn, enabled, example: ex, button, why });
+      term.style.display = '';
+      hints.style.display = '';
+      if (!input.dataset.placeholderSet && ex) { input.placeholder = `Type a command and press Enter — e.g. ${ex}`; input.dataset.placeholderSet = '1'; }
+      renderHints();
+    },
+    btn(label, fn, { primary = false, mono = false, enabled, cmd, example, why } = {}) {
       const b = h('button', { class: `btn btn-sm ${primary ? 'btn-primary' : ''} ${mono ? 'mono' : ''}` }, label);
-      b.addEventListener('click', () => api.run(() => fn(b)));
+      b.addEventListener('click', () => api.run(() => fn(b, null)));
       buttons.push({ b, enabled });
       controls.append(b);
+      // Buttons labelled with a real command can be typed as-is.
+      const patterns = cmd ?? (label.startsWith('docker ') ? label : null);
+      if (patterns) api.command(patterns, (_, m) => fn(b, m), { enabled, example, button: b, why });
       refresh();
       return b;
+    },
+    exec(raw) {
+      const line = normalise(raw);
+      if (!line) return;
+      if (typedHistory[typedHistory.length - 1] !== line) typedHistory.push(line);
+      hIdx = typedHistory.length;
+      if (busy) return api.say('<span class="err">Wait for the current animation to finish, then try again.</span>');
+      for (const c of commands) {
+        const m = c.patterns.map((p) => line.match(p)).find(Boolean);
+        if (!m) continue;
+        if (!isOn(c.enabled)) {
+          flashInput();
+          const why = typeof c.why === 'function' ? c.why() : c.why;
+          return api.say(`<span class="err"><code>${escapeHtml(line)}</code> can't run right now.</span> ${why || 'Check the current state and try another step first.'}`);
+        }
+        input.value = '';
+        c.button && flashButton(c.button);
+        return api.run(() => c.fn(c.button, m));
+      }
+      flashInput();
+      const live = commands.filter((c) => c.example && isOn(c.enabled)).map((c) => `<code>${escapeHtml(c.example)}</code>`);
+      api.say(`<span class="err">This scene doesn't understand <code>${escapeHtml(line)}</code>.</span> ${live.length ? `Try ${live.slice(0, 4).join(', ')}.` : ''}`);
     },
     async run(fn) {
       if (busy) return;
@@ -157,6 +220,14 @@ export const scene = (root, { title, hint = '' }) => {
       try { await fn(); } finally { busy = false; refresh(); }
     },
   };
+
+  const flashInput = () => { term.classList.remove('shake'); void term.offsetWidth; term.classList.add('shake'); };
+  const flashButton = (b) => { b.classList.remove('glow'); void b.offsetWidth; b.classList.add('glow'); };
+  term.addEventListener('submit', (e) => { e.preventDefault(); api.exec(input.value); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && hIdx > 0) { input.value = typedHistory[--hIdx]; e.preventDefault(); }
+    if (e.key === 'ArrowDown') { hIdx = Math.min(typedHistory.length, hIdx + 1); input.value = typedHistory[hIdx] || ''; e.preventDefault(); }
+  });
   return api;
 };
 

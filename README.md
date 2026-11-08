@@ -11,6 +11,7 @@ An interactive website that teaches Docker from zero to advanced. Every concept 
   - **Intermediate:** Dockerfile, layer caching, port mapping, volumes, networking, environment config, Compose, cleanup
   - **Advanced:** multi-stage builds, registries, limits, health and restarts, security, orchestration
 - **Interactive animations** in every lesson: VMs vs containers, build layers, cache hits, port forwarding, volumes, DNS between containers, Compose up and down, rolling updates and more.
+- **Type real commands into every animation.** Each one has a small terminal: type `docker run -d -p 3000:80 nginx`, then `curl localhost:3000`, and watch the request travel. Each terminal suggests commands that fit the current state and explains why a command can't run yet.
 - **Command explainer:** hover or click any part of a command to see what it does.
 - **File explainer:** step through a Dockerfile, `compose.yaml`, `.dockerignore` or `.env` one line at a time.
 - **Quizzes** that mark a lesson complete. Progress is saved in your browser.
@@ -51,3 +52,4 @@ examples/               Small example projects
 
 1. Add an entry to `LESSONS` in `assets/js/lessons.js`, using blocks such as `['p', html]`, `['cmd', {...}]`, `['file', {...}]` and `['anim', 'key']`.
 2. If it needs a new animation, add `ANIMATIONS.key = (root) => { ... }` in `assets/js/animations.js`, using the `scene()` helper.
+3. To make a step typeable, pass `cmd` (a string or RegExp) to `s.btn(...)`, or register a command with no button using `s.command(patterns, fn, { enabled, example, why })`.

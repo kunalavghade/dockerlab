@@ -59,7 +59,7 @@ const renderHome = () => {
         h('div', { class: 'boxes' }, Array.from({ length: 10 }, (_, i) => h('i', { class: i % 3 === 0 ? 'b' : '', style: { animationDelay: `${0.2 + i * 0.12}s` } }))),
         h('div', { class: 'hull' }), h('div', { class: 'waves' }))),
     h('div', { class: 'features' },
-      [['🎬 Animations', 'Click buttons and watch containers, layers, ports and networks move.'],
+      [['🎬 Animations', 'Click buttons — or type the real docker command — and watch containers, layers, ports and networks move.'],
         ['🔍 Explained commands', 'Hover any part of a command to see exactly what it does.'],
         ['📄 Explained files', 'Dockerfile, compose.yaml, .dockerignore — line by line.'],
         ['🧪 Playground', 'A simulated Docker engine with challenges. Safe to break.']]

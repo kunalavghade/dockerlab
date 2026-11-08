@@ -80,6 +80,13 @@ A.vmVsContainer = (root) => {
     await Promise.all([boot('vm', 3200, '~45 s'), boot('ct', 300, '~0.5 s')]);
     s.say(`Done. ${apps} containers started in <b>under a second</b>; ${apps} VMs took <b>about 45 seconds</b> and ~${(apps * 4.2).toFixed(1)} GB.`);
   }, { primary: true });
+  s.command([/^docker (?:container )?run (?:-d )?(?:--name \S+ )?(?:-d )?[\w.:/-]+$/], async () => {
+    addApp();
+    s.say(`<code>docker run</code> added one more container: ~150 MB and it starts in under a second. The VM column shows what the same app would cost as a VM.`);
+  }, { enabled: () => apps < 4, example: 'docker run -d redis' });
+  s.command([/^docker (?:container )?(?:ps|ls)(?: -a)?$/], async () => {
+    s.say(`${apps} container${apps === 1 ? '' : 's'} running, all sharing <b>one</b> host kernel.`);
+  }, { example: 'docker ps' });
   addApp();
 };
 
@@ -117,34 +124,42 @@ A.architecture = (root) => {
     local.set(name, chip);
   };
 
-  s.btn('docker pull redis', async () => {
-    typed(term, 'docker pull redis');
+  const IMG = '(nginx|redis|postgres|node|app)(?::latest)?';
+  const running = [];
+  s.btn('docker pull redis', async (_, m) => {
+    const name = m?.[1] || 'redis';
+    typed(term, m?.input || 'docker pull redis');
+    if (name === 'app') { out(term, '<span class="bad">pull access denied for app — it only exists locally (you built it)</span>'); return s.say('<b>app</b> was built on this host; the registry has never seen it.'); }
     s.say('The <b>client</b> sends a pull request to the <b>daemon</b> over the Docker API…');
     await send('API: pull');
-    if (local.has('redis')) {
-      out(term, 'Status: Image is up to date for redis:latest');
-      return s.say('The daemon already has <b>redis</b>, so nothing is downloaded.');
+    if (local.has(name)) {
+      out(term, `Status: Image is up to date for ${name}:latest`);
+      return s.say(`The daemon already has <b>${name}</b>, so nothing is downloaded.`);
     }
     s.say('…the daemon asks the <b>registry</b> and downloads the image layers.');
-    await pull('redis');
-    out(term, '<span class="ok">Status: Downloaded newer image for redis:latest</span>');
+    await pull(name);
+    out(term, `<span class="ok">Status: Downloaded newer image for ${name}:latest</span>`);
     s.say('The image is now stored on the Docker host, ready to run.');
-  }, { mono: true });
+  }, { mono: true, cmd: new RegExp(`^docker (?:image )?pull ${IMG}$`), example: 'docker pull postgres' });
 
-  s.btn('docker run nginx', async () => {
-    typed(term, 'docker run -d nginx');
+  s.btn('docker run nginx', async (_, m) => {
+    const name = m?.[1] || 'nginx';
+    typed(term, m?.input || 'docker run -d nginx');
     await send('API: run');
-    if (!local.has('nginx')) {
-      out(term, "Unable to find image 'nginx:latest' locally");
-      s.say('No local <b>nginx</b> image — the daemon pulls it first.');
-      await pull('nginx');
+    if (!local.has(name)) {
+      if (name === 'app') { out(term, "<span class=\"bad\">Unable to find image 'app:latest' locally — pull access denied</span>"); return s.say('Build <b>app</b> first: <code>docker build -t app .</code>'); }
+      out(term, `Unable to find image '${name}:latest' locally`);
+      s.say(`No local <b>${name}</b> image — the daemon pulls it first.`);
+      await pull(name);
     }
-    const ctr = h('span', { class: 'chip ok pop' }, h('span', { class: 'status-dot running' }), `nginx_${++ctrCount}`);
-    await fly(s.stage, local.get('nginx'), ctrZone, { label: 'create', ms: 700 });
+    const cname = `${name}_${++ctrCount}`;
+    const ctr = h('span', { class: 'chip ok pop' }, h('span', { class: 'status-dot running' }), cname);
+    await fly(s.stage, local.get(name), ctrZone, { label: 'create', ms: 700 });
     ctrZone.append(ctr);
+    running.push({ name: cname, image: name });
     out(term, randomHex(12));
     s.say('The daemon created a <b>container</b> from the image and started it. The CLI just prints the container ID.');
-  }, { mono: true });
+  }, { mono: true, cmd: new RegExp(`^docker (?:container )?run (?:-d |--detach |--rm |--name \\S+ |-p \\S+ )*${IMG}$`), example: 'docker run -d redis' });
 
   s.btn('docker build -t app .', async () => {
     typed(term, 'docker build -t app .');
@@ -165,11 +180,20 @@ A.architecture = (root) => {
     typed(term, 'docker ps');
     await send('API: list');
     await fly(s.stage, daemon, term, { label: 'JSON', cls: 'white' });
-    out(term, '<span class="dim">CONTAINER ID   IMAGE   STATUS</span>');
-    if (!ctrCount) out(term, '<span class="dim">(none running)</span>');
-    for (let i = 1; i <= ctrCount; i++) out(term, `${randomHex(12)}   nginx   Up ${i * 2} min`);
+    out(term, '<span class="dim">CONTAINER ID   IMAGE      NAMES</span>');
+    if (!running.length) out(term, '<span class="dim">(none running)</span>');
+    running.forEach((c) => out(term, `${randomHex(12)}   ${c.image.padEnd(9)}  ${c.name}`));
     s.say('Even listing containers is an API round-trip to the daemon.');
-  }, { mono: true });
+  }, { mono: true, cmd: [/^docker (?:container )?(?:ps|ls)(?: -a)?$/], example: 'docker ps' });
+  s.command([/^docker (?:image ls|images)$/], async () => {
+    typed(term, 'docker images');
+    await send('API: images');
+    await fly(s.stage, daemon, term, { label: 'JSON', cls: 'white' });
+    out(term, '<span class="dim">REPOSITORY   TAG</span>');
+    if (!local.size) out(term, '<span class="dim">(no images)</span>');
+    [...local.keys()].forEach((n) => out(term, `${n.padEnd(12)} latest`));
+    s.say('<b>docker images</b> lists what the daemon has stored locally.');
+  }, { example: 'docker images' });
 };
 
 // =====================================================================
@@ -191,12 +215,14 @@ A.imageToContainers = (root) => {
     const files = ctrs.reduce((n, c) => n + c.files, 0);
     disk.textContent = `Disk used: 187 MB (image, shared) + ${ctrs.length} writable layer(s) with ${files} file(s) ≈ ${files * 4 + ctrs.length * 2} KB`;
   };
-  const addFile = (c) => {
+  const addFile = (c, file) => {
     c.files++;
-    c.rw.append(h('span', { class: 'file-chip pop' }, `note${c.files}.txt`));
+    const fname = file || `note${c.files}.txt`;
+    c.rw.append(h('span', { class: 'file-chip pop' }, fname));
     updateDisk();
-    s.say(`Wrote <b>note${c.files}.txt</b> into <b>${c.name}</b>'s writable layer. The image and the other containers are untouched.`);
+    s.say(`Wrote <b>${escapeHtml(fname)}</b> into <b>${c.name}</b>'s writable layer. The image and the other containers are untouched.`);
   };
+  const byName = (n) => ctrs.find((c) => c.name === n);
   const removeCtr = async (c) => {
     ctrs.splice(ctrs.indexOf(c), 1);
     await removeAnimated(c.el);
@@ -205,8 +231,10 @@ A.imageToContainers = (root) => {
     s.say(`<b>${c.name}</b> removed — its writable layer (and any files in it) is gone. The image is still there.`);
   };
 
-  s.btn('▶ docker run nginx', async () => {
-    const name = NAMES.find((n) => !ctrs.some((c) => c.name === n));
+  s.btn('▶ docker run nginx', async (_, m) => {
+    const wanted = m?.[1];
+    if (wanted && byName(wanted)) return s.say(`<span class="err">Conflict: the name "${wanted}" is already in use.</span> Container names must be unique.`);
+    const name = wanted || NAMES.find((n) => !byName(n)) || `web-${Date.now() % 1000}`;
     const c = { name, files: 0, rw: h('div', { class: 'rw' }, h('span', { style: { fontSize: '10px', color: 'var(--blue-800)', fontWeight: 700 } }, 'writable ✎')) };
     c.el = h('div', { class: 'ctr-card pop' },
       h('div', { class: 'head' }, h('span', { class: 'status-dot running' }), name,
@@ -219,7 +247,20 @@ A.imageToContainers = (root) => {
     list.append(c.el);
     updateDisk();
     s.say(`<b>${name}</b> created. It <b>reuses</b> the image's read-only layers and gets its own thin <b>writable layer</b> on top.`);
-  }, { primary: true, enabled: () => ctrs.length < 4 });
+  }, { primary: true, enabled: () => ctrs.length < 4, why: 'This demo holds 4 containers — remove one with <code>docker rm -f web-1</code>.', cmd: [/^docker (?:container )?run (?:-d )?(?:--name ([\w.-]+) )?(?:-d )?nginx(?::1\.27)?$/], example: 'docker run -d --name blog nginx' });
+
+  const need = (n) => byName(n) || (s.say(`<span class="err">Error: No such container: ${escapeHtml(n)}</span>`), null);
+  s.command([/^docker exec (?:-it )?([\w.-]+) touch (\S+)$/, /^docker exec (?:-it )?([\w.-]+) sh -c "?echo .* > (\S+?)"?$/], async (_, m) => {
+    const c = need(m[1]);
+    if (c) addFile(c, m[2].split('/').pop());
+  }, { example: 'docker exec web-1 touch hello.txt', enabled: () => ctrs.length > 0 });
+  s.command([/^docker (?:container )?rm (?:-f |--force )?([\w.-]+)$/], async (_, m) => {
+    const c = need(m[1]);
+    if (c) await removeCtr(c);
+  }, { example: 'docker rm -f web-1', enabled: () => ctrs.length > 0 });
+  s.command([/^docker (?:container )?(?:ps|ls)(?: -a)?$/], async () => {
+    s.say(ctrs.length ? `Running: ${ctrs.map((c) => `<b>${c.name}</b> (${c.files} file${c.files === 1 ? '' : 's'})`).join(', ')} — all from the same image.` : 'No containers yet.');
+  }, { example: 'docker ps' });
   updateDisk();
 };
 
@@ -258,47 +299,56 @@ A.runFlow = (root) => {
     }));
   };
 
-  s.btn('▶ docker run -d -p 8080:80 nginx', async () => {
+  const pulled = new Set();
+  s.btn('▶ docker run -d -p 8080:80 nginx', async (_, m) => {
+    const cmd = m?.input || 'docker run -d -p 8080:80 nginx';
+    const img = m?.[2] || 'nginx';
+    const port = (cmd.match(/-p (\d+):\d+/) || [])[1];
+    const detached = /(^| )-d( |$)/.test(cmd);
+    const isCached = img === 'nginx' ? cached.checked : pulled.has(img);
     reset();
     term.replaceChildren();
-    typed(term, 'docker run -d -p 8080:80 nginx');
+    typed(term, cmd);
     activate(0);
-    s.say('<b>Step 1:</b> the daemon checks its local image store for <code>nginx:latest</code>.');
+    s.say(`<b>Step 1:</b> the daemon checks its local image store for <code>${img}:latest</code>.`);
     await wait(900);
     done(0);
-    if (cached.checked) {
+    if (isCached) {
       stepEls[1].className = 'step skip';
       s.say('Found locally — <b>no download needed</b>. This is why the second run is fast.');
       await wait(700);
     } else {
-      out(term, "Unable to find image 'nginx:latest' locally");
-      out(term, 'latest: Pulling from library/nginx');
+      out(term, `Unable to find image '${img}:latest' locally`);
+      out(term, `latest: Pulling from library/${img}`);
       activate(1);
       s.say('<b>Step 2:</b> not found, so it pulls the image. Layers download <b>in parallel</b>.');
       await download();
       out(term, `Digest: sha256:${randomHex(24)}…`);
-      out(term, 'Status: Downloaded newer image for nginx:latest');
+      out(term, `Status: Downloaded newer image for ${img}:latest`);
       done(1);
-      cached.checked = true;
+      pulled.add(img);
+      if (img === 'nginx') cached.checked = true;
     }
     activate(2);
-    s.say('<b>Step 3:</b> create the container: a writable layer, network interface, the port mapping 8080→80.');
+    s.say(`<b>Step 3:</b> create the container: a writable layer, a network interface${port ? `, and the port mapping ${port}→container` : ' (no -p, so no port is published)'}.`);
     await wait(1000);
     done(2);
     activate(3);
-    s.say('<b>Step 4:</b> start the image\'s default command (<code>nginx -g "daemon off;"</code>) as PID 1 inside the container.');
+    s.say(`<b>Step 4:</b> start the image's default command (<code>${{ nginx: 'nginx -g "daemon off;"', redis: 'redis-server', httpd: 'httpd-foreground' }[img]}</code>) as PID 1 inside the container.`);
     await wait(1000);
     done(3);
     stepEls[4].className = 'step active';
-    out(term, `<span class="y">${randomHex(64)}</span>`);
-    s.say('<b>Running!</b> Because of <code>-d</code> the CLI prints the full container ID and gives your terminal back. Visit <code>localhost:8080</code>.');
-  }, { primary: true, mono: true });
+    if (detached) out(term, `<span class="y">${randomHex(64)}</span>`);
+    else out(term, '<span class="dim">…attached: the server\'s logs stream here until you press Ctrl+C</span>');
+    s.say(`<b>Running!</b> ${detached ? 'Because of <code>-d</code> the CLI prints the full container ID and gives your terminal back.' : 'Without <code>-d</code> your terminal stays attached to the container\'s output.'}${port ? ` Visit <code>localhost:${port}</code>.` : ''}`);
+  }, { primary: true, mono: true, cmd: [/^docker (?:container )?run ((?:-d |--detach |--rm |--name \S+ |-p \d+:\d+ )*)(nginx|redis|httpd)(?::latest)?$/], example: 'docker run -d -p 8080:80 nginx' });
   s.btn('Forget image (docker rmi)', async () => {
     cached.checked = false;
+    pulled.clear();
     reset();
     dl.replaceChildren(title('⬇ Layer downloads'), h('div', { class: 'pg-empty' }, 'Image removed — next run downloads again.'));
     s.say('Local image removed. The next run has to pull it again.');
-  });
+  }, { cmd: [/^docker (?:rmi|image rm)(?: -f)? (nginx|redis|httpd)(?::latest)?$/], example: 'docker rmi nginx' });
 };
 
 // =====================================================================
@@ -421,8 +471,25 @@ A.lifecycle = (root) => {
       s.say('<b>rm</b> deletes the container. Use <code>docker rm -f</code> to remove a running one.');
     } },
   };
-  for (const [name, a] of Object.entries(ACTIONS))
-    s.btn(name, a.run, { mono: true, primary: name === 'start', enabled: () => a.from.includes(state) });
+  for (const [name, a] of Object.entries(ACTIONS)) {
+    const cmd = name === 'create' ? [/^docker (?:container )?create (?:--name web )?nginx$/] : [new RegExp(`^docker (?:container )?${name} web$`)];
+    s.btn(name, a.run, { mono: true, primary: name === 'start', enabled: () => a.from.includes(state), cmd, example: name === 'create' ? 'docker create --name web nginx' : `docker ${name} web`,
+      why: () => (state === 'none' || state === 'removed' ? 'There is no container named <b>web</b> yet — <code>docker create --name web nginx</code> first.' : `web is <b>${state}</b>; <b>${name}</b> only works from: ${a.from.join(', ')}.`) });
+  }
+  s.command([/^docker (?:container )?run (?:-d )?--name web (?:-d )?nginx$/], async () => {
+    await ACTIONS.create.run();
+    await ACTIONS.start.run();
+    s.say('<b>run</b> = <b>create</b> + <b>start</b> in one command.');
+  }, { enabled: () => ACTIONS.create.from.includes(state), example: 'docker run -d --name web nginx' });
+  s.command([/^docker (?:container )?rm (?:-f|--force) web$/], async () => {
+    if (state === 'running' || state === 'paused') await ACTIONS.kill.run();
+    await ACTIONS.rm.run();
+    s.say('<b>rm -f</b> kills a running container and removes it in one go.');
+  }, { enabled: () => ['created', 'running', 'paused', 'exited'].includes(state), example: 'docker rm -f web' });
+  s.command([/^docker (?:container )?(?:ps -a|ls -a|ps|ls)$/], async () => {
+    const shown = state === 'running' || state === 'paused' || (state !== 'none' && state !== 'removed');
+    s.say(shown ? `<code>web</code> is <b>${state}</b>.${state === 'created' || state === 'exited' ? ' (Plain <code>docker ps</code> would hide it — only <code>-a</code> shows non-running containers.)' : ''}` : 'No container named web exists.');
+  }, { example: 'docker ps -a' });
   place('none');
   describe();
 };
@@ -453,7 +520,7 @@ A.logsExec = (root) => {
     if (follow) { fly(s.stage, stdout, term, { cls: 'dot', ms: 600 }); setTimeout(() => out(term, line), scaled(600)); }
   }, 1300);
 
-  const followBtn = s.btn('docker logs -f web', async () => {
+  const toggleFollow = async () => {
     follow = !follow;
     followBtn.textContent = follow ? '^C stop following' : 'docker logs -f web';
     if (follow) {
@@ -463,43 +530,74 @@ A.logsExec = (root) => {
       out(term, '^C');
       s.say('Stopped following. The container keeps running — only your view stopped.');
     }
-  }, { mono: true, enabled: () => !inside });
-  s.btn('docker logs --tail 3 web', async () => {
-    typed(term, 'docker logs --tail 3 web');
-    logs.slice(-3).forEach((l) => out(term, l));
+  };
+  const followBtn = s.btn('docker logs -f web', async (_, m) => {
+    if (m && follow) return s.say('Already following. Type <code>^C</code> (or press the button) to stop.');
+    await toggleFollow();
+  }, { mono: true, enabled: () => !inside, why: 'You are inside the container shell — type <code>exit</code> first.', cmd: [/^docker (?:container )?logs (?:-f|--follow)(?: --tail \d+| -n \d+)? web$/], example: 'docker logs -f web' });
+  s.command(['^c', 'ctrl+c', 'ctrl-c'], toggleFollow, { enabled: () => follow, example: '^C', why: 'Nothing to interrupt — you are not following logs.' });
+  s.btn('docker logs --tail 3 web', async (_, m) => {
+    const n = Number(m?.[1] || m?.[2] || (m ? 8 : 3));
+    typed(term, m?.input || 'docker logs --tail 3 web');
+    logs.slice(-n).forEach((l) => out(term, l));
     s.say('<b>logs</b> prints what the container already wrote to stdout/stderr. <code>--tail</code> limits it.');
-  }, { mono: true, enabled: () => !inside && !follow });
-  s.btn('docker exec -it web sh', async () => {
-    typed(term, 'docker exec -it web sh');
+  }, { mono: true, enabled: () => !inside && !follow, cmd: [/^docker (?:container )?logs(?: --tail (\d+)| -n (\d+))? web$/], example: 'docker logs --tail 5 web' });
+  s.btn('docker exec -it web sh', async (_, m) => {
+    typed(term, m?.input || 'docker exec -it web sh');
     await fly(s.stage, term, procs, { label: 'exec sh' });
     shProc = h('div', { class: 'proc pop', style: { background: 'var(--blue-100)' } }, h('span', { class: 'status-dot running' }), 'PID 47 sh  ← you are here');
     procs.append(shProc);
     inside = true;
     out(term, '<span class="dim">(now inside the container)</span>');
     s.say('<b>exec</b> started an extra process (<code>sh</code>) <b>inside</b> the running container. Your prompt is now the container\'s.');
-  }, { mono: true, enabled: () => !inside && !follow });
-  s.btn('ls /usr/share/nginx/html', async () => {
-    typed(term, 'ls /usr/share/nginx/html', prompt());
-    out(term, '50x.html    index.html');
+  }, { mono: true, enabled: () => !inside && !follow, cmd: [/^docker (?:container )?exec -it web (?:sh|bash|\/bin\/sh|\/bin\/bash)$/], example: 'docker exec -it web sh' });
+  // Commands a shell inside the nginx container can answer.
+  const SHELL = {
+    ls: (arg) => (/nginx\/html/.test(arg) ? '50x.html    index.html' : /etc\/nginx/.test(arg) ? 'conf.d  mime.types  nginx.conf' : 'bin  boot  dev  docker-entrypoint.sh  etc  home  lib  proc  root  run  sbin  tmp  usr  var'),
+    pwd: () => '/',
+    whoami: () => 'root',
+    hostname: () => '3f9c2a1b7e4d',
+    ps: () => 'PID   USER     COMMAND\n    1 root     nginx: master process\n   29 nginx    nginx: worker process\n   47 root     sh\n   53 root     ps',
+    cat: (arg) => (/os-release/.test(arg) ? 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"' : /index\.html/.test(arg) ? '<h1>Welcome to nginx!</h1> …' : `cat: ${arg || ''}: No such file or directory`),
+    env: () => 'HOSTNAME=3f9c2a1b7e4d\nNGINX_VERSION=1.27.0\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+  };
+  const runShell = (line) => {
+    const [prog, ...rest] = line.split(' ');
+    return SHELL[prog] ? SHELL[prog](rest.join(' ')) : `sh: ${prog}: not found`;
+  };
+  s.btn('ls /usr/share/nginx/html', async (_, m) => {
+    const line = m?.input || 'ls /usr/share/nginx/html';
+    typed(term, line, prompt());
+    out(term, escapeHtml(runShell(line)).replace(/\n/g, '<br>'));
     s.say('You are looking at the <b>container\'s</b> filesystem, not your laptop\'s.');
-  }, { mono: true, enabled: () => inside });
+  }, { mono: true, enabled: () => inside, cmd: [/^(?:ls|pwd|whoami|hostname|ps|cat|env)(?: .*)?$/], example: 'ls /usr/share/nginx/html' });
+  s.command([/^docker (?:container )?exec web ((?:ls|pwd|whoami|hostname|ps|cat|env)(?: .*)?)$/], async (_, m) => {
+    typed(term, m.input);
+    out(term, escapeHtml(runShell(m[1])).replace(/\n/g, '<br>'));
+    s.say('Without <code>-it</code>, <b>exec</b> runs one command inside the container, prints its output and returns.');
+  }, { enabled: () => !inside && !follow, example: 'docker exec web cat /etc/os-release' });
   s.btn('exit', async () => {
     typed(term, 'exit', prompt());
     await removeAnimated(shProc);
     inside = false;
     s.say('The <code>sh</code> process ended. The container keeps running because its main process (PID 1) is untouched.');
-  }, { mono: true, enabled: () => inside });
+  }, { mono: true, enabled: () => inside, cmd: ['exit'], example: 'exit' });
   s.btn('docker stats --no-stream', async () => {
     typed(term, 'docker stats --no-stream');
     out(term, '<span class="dim">NAME  CPU %   MEM USAGE / LIMIT    NET I/O</span>');
     out(term, `web   ${rand(0.1, 2.5).toFixed(2)}%   ${rand(6, 12).toFixed(1)}MiB / 7.6GiB   ${Math.round(rand(20, 90))}kB / ${Math.round(rand(40, 200))}kB`);
     s.say('<b>stats</b> shows live resource usage (drop <code>--no-stream</code> to keep it updating).');
-  }, { mono: true, enabled: () => !inside && !follow });
+  }, { mono: true, enabled: () => !inside && !follow, cmd: [/^docker (?:container )?stats(?: --no-stream)?(?: web)?$/], example: 'docker stats --no-stream' });
+  s.command([/^docker (?:container )?top web$/], async (_, m) => {
+    typed(term, m.input);
+    out(term, escapeHtml(SHELL.ps().split('\n').slice(0, inside ? 4 : 3).join('\n')).replace(/\n/g, '<br>'));
+    s.say('<b>top</b> lists the processes running inside the container, from the host\'s point of view.');
+  }, { enabled: () => !inside && !follow, example: 'docker top web' });
   s.btn('docker inspect web', async () => {
     typed(term, "docker inspect --format '{{.State.Status}} {{.NetworkSettings.IPAddress}}' web");
     out(term, 'running 172.17.0.2');
     s.say('<b>inspect</b> returns the full JSON description; <code>--format</code> picks fields out of it.');
-  }, { mono: true, enabled: () => !inside && !follow });
+  }, { mono: true, enabled: () => !inside && !follow, cmd: [/^docker (?:container )?inspect (?:--format .* |-f .* )?web$/], example: 'docker inspect web' });
 };
 
 // =====================================================================
@@ -555,6 +653,16 @@ A.buildLayers = (root) => {
   s.btn('Next step ▸', step, { primary: true, enabled: () => i < STEPS.length });
   s.btn('Build all', async () => { while (i < STEPS.length) await step(); }, { enabled: () => i < STEPS.length });
   s.btn('Reset', async () => { reset(); s.say('Reset. Press <b>Next step</b>.'); });
+  s.command([/^docker (?:image )?build (?:-t|--tag) myapp(?::[\w.-]+)? \.$/, /^docker (?:image )?build \.$/], async () => {
+    reset();
+    while (i < STEPS.length) await step();
+  }, { example: 'docker build -t myapp:1.0 .' });
+  s.command([/^docker (?:image )?history myapp(?::1\.0)?$/], async () => {
+    if (i < STEPS.length) return s.say('<span class="err">Error: No such image: myapp:1.0</span> — build it first.');
+    out(term, '<span class="dim">CREATED BY                    SIZE</span>');
+    STEPS.slice().reverse().forEach(([ins, , mb]) => out(term, `${escapeHtml(ins.padEnd(30))}${fmtMB(mb)}`));
+    s.say('<b>history</b> lists the layers newest-first, with the instruction that made each one.');
+  }, { example: 'docker history myapp:1.0' });
   reset();
 };
 
@@ -608,9 +716,9 @@ A.cacheDemo = (root) => {
     built = true;
     changes.clear();
     render();
-  }, { primary: true, mono: true });
-  s.btn('✎ Edit app.js', async () => { changes.add('src'); render(); s.say('You changed source code. Which layers will rebuild?'); }, { enabled: () => built });
-  s.btn('📦 Add a dependency', async () => { changes.add('pkg'); render(); s.say('You changed <b>package.json</b>. This must re-run npm install in both orders.'); }, { enabled: () => built });
+  }, { primary: true, mono: true, cmd: [/^docker (?:image )?build (?:(?:-t|--tag) [\w.:-]+ )?\.$/], example: 'docker build -t app .' });
+  s.btn('✎ Edit app.js', async () => { changes.add('src'); render(); s.say('You changed source code. Which layers will rebuild?'); }, { enabled: () => built, cmd: [/^(?:echo .*>>? ?app\.js|vim app\.js|nano app\.js|code app\.js|touch app\.js)$/], example: 'echo "// fix" >> app.js' });
+  s.btn('📦 Add a dependency', async () => { changes.add('pkg'); render(); s.say('You changed <b>package.json</b>. This must re-run npm install in both orders.'); }, { enabled: () => built, cmd: [/^npm (?:install|i|add) [\w@./-]+$/, /^npm uninstall [\w@./-]+$/], example: 'npm install express' });
   render();
 };
 
@@ -644,9 +752,16 @@ A.portMapping = (root) => {
   s.add(h('label', { class: 'inline' }, publish, 'Publish (-p)'), h('label', { class: 'inline' }, 'host', hp), h('label', { class: 'inline' }, 'container', cp));
   s.sep();
 
-  s.btn('▶ Send request', async () => {
+  const send = async (reqPort = hp.value) => {
+    url.textContent = `🔒 http://localhost:${reqPort}`;
     page.textContent = 'Loading…';
-    await fly(s.stage, browser, hostPort, { label: `GET :${hp.value}` });
+    await fly(s.stage, browser, hostPort, { label: `GET :${reqPort}` });
+    if (String(reqPort) !== String(hp.value) && publish.checked) {
+      flash(hostPort, 'shake');
+      await fly(s.stage, hostPort, browser, { label: 'refused', cls: 'bad' });
+      page.innerHTML = '<b>ERR_CONNECTION_REFUSED</b><br>Nothing listens on this port.';
+      return s.say(`Nothing is published on host port <b>${reqPort}</b> — the container is mapped to <b>${hp.value}</b>. Use <code>curl localhost:${hp.value}</code>.`);
+    }
     if (!publish.checked) {
       flash(hostPort, 'shake');
       await fly(s.stage, hostPort, browser, { label: 'refused', cls: 'bad' });
@@ -665,7 +780,16 @@ A.portMapping = (root) => {
     await fly(s.stage, nginx, browser, { label: '200 OK', cls: 'ok', ms: 1100 });
     page.innerHTML = '<b style="font-size:15px">Welcome to nginx!</b><br><small>served from inside the container</small>';
     s.say(`Request to <b>localhost:${hp.value}</b> was forwarded by Docker to <b>port ${cp.value} inside the container</b>. 🎉`);
-  }, { primary: true });
+  };
+  s.btn('▶ Send request', () => send(), { primary: true });
+  s.command([/^docker (?:container )?run (?:-d |--rm |--name \S+ )*(?:-p (?:127\.0\.0\.1:)?(\d+):(\d+) )?(?:-d |--rm |--name \S+ )*nginx(?::[\w.-]+)?$/], async (_, m) => {
+    publish.checked = !!m[1];
+    if (m[1]) { hp.value = m[1]; cp.value = m[2]; }
+    sync();
+    flash(hostPort);
+    s.say(m[1] ? `Container started with host <b>${m[1]}</b> → container <b>${m[2]}</b>. Now test it: <code>curl localhost:${m[1]}</code>` : 'Container started <b>without</b> <code>-p</code>. Try <code>curl localhost:8080</code> and see what happens.');
+  }, { example: 'docker run -d -p 3000:80 nginx' });
+  s.command([/^curl (?:-\w+ )*(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)(?::(\d+))?\/?$/], (_, m) => send(m[1] || '80'), { example: 'curl localhost:8080' });
   s.add(preview);
   sync();
 };
@@ -703,12 +827,17 @@ A.volumes = (root) => {
     return { el, files, own: [] };
   };
 
-  const sel = h('select', { onchange: (e) => { mode = e.target.value; ctr = null; hostFiles.length = 0; ctrArea.replaceChildren(); renderHost(); s.refresh(); s.say('Storage type changed. Press <b>docker run</b>.'); } },
+  const setMode = (m) => { mode = m; sel.value = m; ctr = null; hostFiles.length = 0; ctrArea.replaceChildren(); renderHost(); s.refresh(); };
+  const sel = h('select', { onchange: (e) => { setMode(e.target.value); s.say('Storage type changed. Press <b>docker run</b>.'); } },
     h('option', { value: 'none' }, 'No volume'), h('option', { value: 'volume' }, 'Named volume'), h('option', { value: 'bind' }, 'Bind mount'));
   s.add(h('label', { class: 'inline' }, 'Storage:', sel));
   s.sep();
 
-  s.btn('▶ docker run', async () => {
+  s.btn('▶ docker run', async (_, m) => {
+    if (m) {
+      const wanted = !m[1] ? 'none' : /^(\.|\/|\$|~)/.test(m[1]) ? 'bind' : 'volume';
+      if (wanted !== mode) setMode(wanted);
+    }
     ctr = makeCtr();
     ctrArea.append(ctr.el);
     if (mode !== 'none' && hostFiles.length) {
@@ -716,30 +845,41 @@ A.volumes = (root) => {
       hostFiles.forEach((f) => ctr.files.append(fileChip(f)));
       s.say(`The new container mounts the same ${mode === 'volume' ? 'volume' : 'folder'} — <b>all ${hostFiles.length} file(s) are back</b>. 🎉`);
     } else s.say(mode === 'none' ? 'Fresh container, empty writable layer.' : 'Container started with the mount attached.');
-  }, { primary: true, enabled: () => !ctr });
-  s.btn('✎ Write file', async () => {
-    const name = `file${++n}.txt`;
+  }, { primary: true, enabled: () => !ctr, why: 'A container is already running — remove it first: <code>docker rm -f app</code>', cmd: [/^docker (?:container )?run (?:-d |--name [\w-]+ )*(?:-v ([^\s:]+):\/data )?(?:-d |--name [\w-]+ )*myapp$/], example: 'docker run -d -v appdata:/data myapp' });
+  s.btn('✎ Write file', async (_, m) => {
+    n++;
+    const name = m?.[1] || m?.[2] || `file${n}.txt`;
     ctr.files.append(fileChip(name));
     if (mode === 'none') { ctr.own.push(name); return s.say(`<b>${name}</b> written into the container's writable layer.`); }
     await fly(s.stage, ctr.el, disk, { label: name, cls: 'white', ms: 700 });
     hostFiles.push(name);
     renderHost();
     s.say(`<b>${name}</b> written to <code>/data</code> — which is really the ${mode === 'volume' ? 'volume' : 'host folder'}.`);
-  }, { enabled: () => !!ctr });
+  }, { enabled: () => !!ctr, cmd: [/^docker exec (?:-it )?[\w-]+ (?:touch \/data\/([\w.-]+)|sh -c "?echo .*> ?\/data\/([\w.-]+)"?)$/], example: 'docker exec app touch /data/notes.txt' });
   s.btn('🗑 docker rm -f', async () => {
     const lost = ctr.own.length;
     await removeAnimated(ctr.el);
     ctr = null;
     s.say(mode === 'none' ? `Container removed. <b>${lost} file(s) lost forever</b> — they lived in the writable layer.` : `Container removed, but the data is <b>safe on the host</b> (${hostFiles.length} file(s)).`);
-  }, { enabled: () => !!ctr });
-  s.btn('✎ Edit on host', async () => {
-    const name = `edited${++n}.html`;
+  }, { enabled: () => !!ctr, cmd: [/^docker (?:container )?rm (?:-f|--force) [\w-]+$/], example: 'docker rm -f app' });
+  s.btn('✎ Edit on host', async (_, m) => {
+    n++;
+    const name = m?.[1] || m?.[2] || `edited${n}.html`;
     hostFiles.push(name);
     renderHost();
     await fly(s.stage, disk, ctr.el, { label: name, cls: 'white', ms: 700 });
     ctr.files.append(fileChip(name));
     s.say('You changed a file in your editor and it appeared <b>instantly</b> inside the container. This is why bind mounts are great for development.');
-  }, { enabled: () => mode === 'bind' && !!ctr });
+  }, { enabled: () => mode === 'bind' && !!ctr, why: () => (mode !== 'bind' ? 'This only works with a bind mount: <code>docker run -d -v ./site:/data myapp</code>' : 'Start a container first.'), cmd: [/^(?:touch \.?\/?site\/([\w.-]+)|echo .*> ?\.?\/?site\/([\w.-]+))$/], example: 'echo "<h1>hi</h1>" > site/index.html' });
+  s.command([/^docker volume (?:ls|list)$/], async () => {
+    s.say(mode === 'volume' ? 'DRIVER  VOLUME NAME<br><code>local   appdata</code> — Docker keeps it even when no container uses it.' : 'No named volumes in this setup. Bind mounts are just host folders, so they do not show up here.');
+  }, { example: 'docker volume ls' });
+  s.command([/^docker volume rm [\w-]+$/], async () => {
+    if (ctr) return s.say('<span class="err">Error: remove appdata: volume is in use</span> — remove the container first.');
+    hostFiles.length = 0;
+    renderHost();
+    s.say('Volume deleted — <b>its data is gone for good</b>. This is the one way named-volume data really disappears.');
+  }, { enabled: () => mode === 'volume', example: 'docker volume rm appdata' });
   s.add(preview);
   renderHost();
 };
@@ -763,40 +903,70 @@ A.networks = (root) => {
     h('div', { class: 'net-zone' }, h('div', { class: 'zone-title' }, 'bridge (default) · no DNS'), bridgeCtrs), appZone));
   let created = false;
 
-  const ping = async (from) => {
-    const a = C[from], b = C.db;
-    s.say(`<code>docker exec ${from} ping db</code>…`);
+  const ping = async (from, target = 'db') => {
+    const a = C[from];
+    const byIp = /^\d+\.\d+\.\d+\.\d+$/.test(target);
+    const b = byIp ? Object.values(C).find((c) => c.ipEl.textContent === target) : C[target];
+    s.say(`<code>docker exec ${from} ping ${target}</code>…`);
+    if (b === a) return s.say(`Pinging itself works, but that does not teach us much — try another container.`);
+    if (byIp) {
+      if (!b || b.net !== a.net) {
+        flash(a.el, 'shake');
+        return s.say(`<b>100% packet loss</b> — no container at ${target} on <b>${a.net}</b>. Different networks cannot reach each other.`);
+      }
+      await fly(s.stage, a.el, b.el, { label: 'ICMP', ms: 700 });
+      await fly(s.stage, b.el, a.el, { label: 'reply', cls: 'ok', ms: 700 });
+      return s.say(`<b>64 bytes from ${target}</b> — IPs work on the same network${a.net === 'bridge' ? ', even the default bridge. But IPs change when containers restart, which is why names are better' : ''}.`);
+    }
+    if (!b) return s.say(`<span class="err">ping: bad address '${escapeHtml(target)}'</span> — there is no container with that name.`);
     if (a.net !== 'appnet' || b.net !== 'appnet') {
       flash(a.el, 'shake');
       return s.say(a.net === 'bridge' && b.net === 'bridge'
-        ? '<b>ping: bad address \'db\'</b> — the default bridge has no DNS, so names do not resolve. (The IP would work, but IPs change.)'
-        : `<b>ping: bad address 'db'</b> — <b>${from}</b> is not on <b>appnet</b>. Networks isolate containers from each other.`);
+        ? `<b>ping: bad address '${target}'</b> — the default bridge has no DNS, so names do not resolve. (Its IP ${b.ipEl.textContent} would work, but IPs change.)`
+        : `<b>ping: bad address '${target}'</b> — <b>${from}</b> and <b>${target}</b> are not both on <b>appnet</b>. Networks isolate containers from each other.`);
     }
-    await fly(s.stage, a.el, dns, { label: 'db?', cls: 'white', ms: 700 });
-    await fly(s.stage, dns, a.el, { label: '172.18.0.3', ms: 700 });
+    await fly(s.stage, a.el, dns, { label: `${target}?`, cls: 'white', ms: 700 });
+    await fly(s.stage, dns, a.el, { label: b.ipEl.textContent, ms: 700 });
     await fly(s.stage, a.el, b.el, { label: 'ICMP', ms: 700 });
     await fly(s.stage, b.el, a.el, { label: 'reply', cls: 'ok', ms: 700 });
-    s.say(`<b>64 bytes from db (172.18.0.3)</b> — Docker's embedded DNS resolved the name <b>db</b>. 🎉`);
+    s.say(`<b>64 bytes from ${target} (${b.ipEl.textContent})</b> — Docker's embedded DNS resolved the name <b>${target}</b>. 🎉`);
   };
-
-  s.btn('api → ping db', () => ping('api'), { mono: true, primary: true });
-  s.btn('web → ping db', () => ping('web'), { mono: true });
-  s.sep();
-  s.btn('docker network create appnet', async () => {
+  const connect = async (k) => {
+    await moveTo(C[k].el, appCtrs);
+    C[k].net = 'appnet';
+    C[k].ipEl.textContent = `172.18.0.${appCtrs.children.length + 1}`;
+  };
+  const createNet = async () => {
     created = true;
     appZone.classList.remove('hidden-zone');
     appTitle.textContent = 'appnet (user-defined) · DNS on';
     flash(appZone);
     s.say('Created <b>appnet</b>, a user-defined bridge with built-in DNS.');
-  }, { mono: true, enabled: () => !created });
+  };
+
+  s.btn('api → ping db', () => ping('api'), { mono: true, primary: true });
+  s.btn('web → ping db', () => ping('web'), { mono: true });
+  s.command([/^docker exec (?:-it )?(web|api|db) ping (?:-c \d+ )?([\w.-]+)(?: -c \d+)?$/], (_, m) => ping(m[1], m[2]), { example: 'docker exec api ping db' });
+  s.sep();
+  s.btn('docker network create appnet', createNet, { mono: true, enabled: () => !created, cmd: [/^docker network create (?:-d bridge |--driver bridge )?appnet$/] });
   s.btn('run api + db on appnet', async () => {
-    for (const [k, ip] of [['api', '172.18.0.2'], ['db', '172.18.0.3']]) {
-      await moveTo(C[k].el, appCtrs);
-      C[k].net = 'appnet';
-      C[k].ipEl.textContent = ip;
-    }
+    for (const k of ['api', 'db']) if (C[k].net !== 'appnet') await connect(k);
     s.say('<code>docker run --network appnet …</code> — api and db now share appnet. <b>web</b> stays on the default bridge. Try both pings!');
   }, { mono: true, enabled: () => created && C.api.net !== 'appnet' });
+  s.command([/^docker network connect appnet (web|api|db)$/], async (_, m) => {
+    if (!created) return s.say('<span class="err">Error: network appnet not found</span> — create it first.');
+    if (C[m[1]].net === 'appnet') return s.say(`<b>${m[1]}</b> is already on appnet.`);
+    await connect(m[1]);
+    s.say(`<b>${m[1]}</b> joined appnet and can now reach other appnet containers by name.`);
+  }, { example: 'docker network connect appnet web' });
+  s.command([/^docker network (?:ls|list)$/], async () => {
+    s.say(`NETWORK: <code>bridge</code> (default) · <code>host</code> · <code>none</code>${created ? ' · <code>appnet</code> (yours)' : ''}`);
+  }, { example: 'docker network ls' });
+  s.command([/^docker network inspect (appnet|bridge)$/], async (_, m) => {
+    if (m[1] === 'appnet' && !created) return s.say('<span class="err">Error: No such network: appnet</span>');
+    const members = Object.values(C).filter((c) => c.net === m[1]).map((c) => `${c.name} ${c.ipEl.textContent}`);
+    s.say(`<b>${m[1]}</b> containers: ${members.length ? members.map((x) => `<code>${x}</code>`).join(', ') : 'none'}`);
+  }, { example: 'docker network inspect appnet' });
 };
 
 // =====================================================================
@@ -818,12 +988,13 @@ A.buildVsRun = (root) => {
   s.add(h('label', { class: 'inline' }, useOverride, '-e APP_ENV='), val);
   s.sep();
 
-  s.btn('1. docker build', async () => {
+  s.btn('1. docker build', async (_, m) => {
+    const nodeVer = m?.[1] || m?.[2] || '20';
     buildBox.replaceChildren(); imgBox.replaceChildren(); runTerm.replaceChildren();
-    const arg = h('span', { class: 'chip warn pop' }, 'ARG NODE_VERSION=20');
+    const arg = h('span', { class: 'chip warn pop' }, `ARG NODE_VERSION=${nodeVer}`);
     const env = h('span', { class: 'chip blue pop' }, 'ENV APP_ENV=production');
     buildBox.append(arg);
-    s.say('<b>ARG</b> is available while the Dockerfile runs — e.g. to pick <code>node:${NODE_VERSION}</code>.');
+    s.say(`<b>ARG</b> is available while the Dockerfile runs — here it picks <code>FROM node:${nodeVer}-alpine</code>.${nodeVer !== '20' ? ' Your <code>--build-arg</code> overrode the default 20.' : ''}`);
     await wait(900);
     buildBox.append(env);
     s.say('<b>ENV</b> is set during the build too…');
@@ -837,8 +1008,9 @@ A.buildVsRun = (root) => {
     buildBox.append(h('span', { class: 'chip ghost pop' }, 'build finished: ARG discarded'));
     built = true;
     s.say('Build done. The <b>ARG is gone</b>; only ENV made it into the image. Now run a container.');
-  }, { primary: true });
-  s.btn('2. docker run', async () => {
+  }, { primary: true, cmd: [/^docker (?:image )?build (?:--build-arg node_version=(\d+) )?(?:-t myapp(?::[\w.-]+)? )?(?:--build-arg node_version=(\d+) )?\.$/], example: 'docker build --build-arg NODE_VERSION=22 -t myapp .' });
+  s.btn('2. docker run', async (_, m) => {
+    if (m) { useOverride.checked = !!m[1]; if (m[1]) val.value = m[1]; }
     const override = useOverride.checked ? val.value.trim() || 'staging' : null;
     runTerm.replaceChildren();
     await fly(s.stage, imgNode, runNode, { label: 'start', ms: 700 });
@@ -847,7 +1019,7 @@ A.buildVsRun = (root) => {
     out(runTerm, `APP_ENV=<span class="${override ? 'y' : 'ok'}">${escapeHtml(override || 'production')}</span>`);
     out(runTerm, '<span class="bad">NODE_VERSION: (not set)</span>');
     s.say(override ? `<b>-e</b> overrode the image default: same image, now configured as <b>${escapeHtml(override)}</b>.` : 'The container sees the image\'s ENV default. NODE_VERSION is missing — ARGs never reach runtime.');
-  }, { enabled: () => built });
+  }, { enabled: () => built, why: 'There is no <b>myapp</b> image yet — build it first: <code>docker build -t myapp .</code>', cmd: [/^docker (?:container )?run (?:--rm |-d )*(?:-e app_env=([\w-]+) )?(?:--rm |-d )*myapp(?: printenv.*)?$/], example: 'docker run -e APP_ENV=staging myapp' });
 };
 
 // =====================================================================
@@ -898,17 +1070,31 @@ A.compose = (root) => {
     await startSvc('myapp-web-1', 'nginx:1.27', '  0.0.0.0:8080→80');
     up = true;
     s.say('Stack is up: 3 containers, 1 network, 1 volume — from <b>one command</b>. Open <code>localhost:8080</code>.');
-  }, { primary: true, mono: true, enabled: () => !up });
-  s.btn('--scale api=3', async () => {
-    typed(term, 'docker compose up -d --scale api=3');
-    for (const i of [2, 3]) await startSvc(`myapp-api-${i}`, 'build: ./api');
-    s.say('Two more <b>api</b> replicas. Compose DNS round-robins the name <code>api</code> across them.');
-  }, { mono: true, enabled: () => up && !svcs.some((x) => x.name === 'myapp-api-3') });
+  }, { primary: true, mono: true, enabled: () => !up, why: 'The stack is already up.', cmd: [/^docker[ -]compose up(?: -d| --detach)?(?: --build)?$/] });
+  const apiCount = () => svcs.filter((x) => x.name.startsWith('myapp-api-')).length;
+  s.btn('--scale api=3', async (_, m) => {
+    const want = Math.max(1, Math.min(5, Number(m?.[1] || 3)));
+    typed(term, `docker compose up -d --scale api=${want}`);
+    for (let i = apiCount() + 1; i <= want; i++) await startSvc(`myapp-api-${i}`, 'build: ./api');
+    for (let i = apiCount(); i > want; i--) {
+      const x = svcs.find((v) => v.name === `myapp-api-${i}`);
+      out(term, ` ✔ Container ${x.name}  <span class="bad">Removed</span>`);
+      svcs.splice(svcs.indexOf(x), 1);
+      await removeAnimated(x.el);
+    }
+    s.say(`<b>api</b> now runs <b>${want}</b> replica${want > 1 ? 's' : ''}. Compose DNS round-robins the name <code>api</code> across them.${Number(m?.[1]) > 5 ? ' (This demo caps it at 5.)' : ''}`);
+  }, { mono: true, enabled: () => up, why: 'Start the stack first: <code>docker compose up -d</code>', cmd: [/^docker[ -]compose up (?:-d |--detach )?--scale api=(\d+)(?: -d| --detach)?$/], example: 'docker compose up -d --scale api=4' });
   s.btn('docker compose ps', async () => {
     typed(term, 'docker compose ps');
     out(term, '<span class="dim">NAME            STATUS</span>');
     svcs.forEach((x) => out(term, `${x.name.padEnd(16)}${x.status.textContent}`));
-  }, { mono: true, enabled: () => up });
+  }, { mono: true, enabled: () => up, why: 'Nothing is running — start the stack with <code>docker compose up -d</code>.', cmd: [/^docker[ -]compose (?:ps|ls)$/] });
+  s.command([/^docker[ -]compose logs (?:-f )?(web|api|db)$/], async (_, m) => {
+    typed(term, m.input);
+    const LOGS = { db: 'database system is ready to accept connections', api: 'Listening on :3000, connected to db:5432', web: '"GET / HTTP/1.1" 200 615' };
+    svcs.filter((x) => x.name.includes(`-${m[1]}-`)).forEach((x) => out(term, `<span class="y">${x.name}</span>  | ${escapeHtml(LOGS[m[1]])}`));
+    s.say(`Logs from every <b>${m[1]}</b> container, each line prefixed with the container name.`);
+  }, { enabled: () => up, why: 'No containers yet — <code>docker compose up -d</code> first.', example: 'docker compose logs api' });
   const down = async (withVolumes) => {
     typed(term, `docker compose down${withVolumes ? ' -v' : ''}`);
     for (const x of svcs.slice().reverse()) {
@@ -926,8 +1112,8 @@ A.compose = (root) => {
     up = false;
     s.say(withVolumes ? 'Everything removed, <b>including the database volume</b>. The data is gone.' : 'Containers and network removed. The <b>volume is kept</b> — run up again and your data is still there.');
   };
-  s.btn('docker compose down', () => down(false), { mono: true, enabled: () => up });
-  s.btn('down -v', () => down(true), { mono: true, enabled: () => up });
+  s.btn('docker compose down', () => down(false), { mono: true, enabled: () => up, why: 'The stack is already down.', cmd: [/^docker[ -]compose down$/] });
+  s.btn('down -v', () => down(true), { mono: true, enabled: () => up, why: 'The stack is already down.', cmd: [/^docker[ -]compose down (?:-v|--volumes)$/], example: 'docker compose down -v' });
 };
 
 // =====================================================================
@@ -986,11 +1172,22 @@ A.prune = (root) => {
     s.say(`<code>${cmd}</code> → removed ${victims.length} item(s), reclaimed <b>${fmtMB(before - total())}</b>. ${msg}`);
   };
 
-  s.btn('container prune', () => sweep('containers', (c) => !c.running, 'docker container prune', 'Stopped containers are gone; their images may now be unused.'), { mono: true });
-  s.btn('image prune', () => sweep('images', (i) => i.dangling, 'docker image prune', 'Only <b>dangling</b> &lt;none&gt; images.'), { mono: true });
-  s.btn('image prune -a', () => sweep('images', (i) => !usedImages().has(i.id), 'docker image prune -a', 'Every image not used by <i>any</i> container (running or stopped).'), { mono: true });
-  s.btn('volume prune', () => sweep('volumes', (v) => !usedVols().has(v.id), 'docker volume prune', '⚠ Unused volumes deleted — <b>that was data</b>.'), { mono: true });
-  s.btn('builder prune', () => sweep('cache', () => true, 'docker builder prune', 'Build cache cleared; next builds start cold.'), { mono: true });
+  s.btn('container prune', () => sweep('containers', (c) => !c.running, 'docker container prune', 'Stopped containers are gone; their images may now be unused.'), { mono: true, cmd: [/^docker container prune(?: -f| --force)?$/], example: 'docker container prune' });
+  s.btn('image prune', () => sweep('images', (i) => i.dangling, 'docker image prune', 'Only <b>dangling</b> &lt;none&gt; images.'), { mono: true, cmd: [/^docker image prune(?: -f| --force)?$/], example: 'docker image prune' });
+  s.btn('image prune -a', () => sweep('images', (i) => !usedImages().has(i.id), 'docker image prune -a', 'Every image not used by <i>any</i> container (running or stopped).'), { mono: true, cmd: [/^docker image prune (?:-a|--all)(?: -f| --force)?$/, /^docker image prune -af$/], example: 'docker image prune -a' });
+  s.btn('volume prune', () => sweep('volumes', (v) => !usedVols().has(v.id), 'docker volume prune', '⚠ Unused volumes deleted — <b>that was data</b>.'), { mono: true, cmd: [/^docker volume prune(?: -a| --all)?(?: -f| --force)?$/], example: 'docker volume prune' });
+  s.btn('builder prune', () => sweep('cache', () => true, 'docker builder prune', 'Build cache cleared; next builds start cold.'), { mono: true, cmd: [/^docker (?:builder|buildx) prune(?: -f| --force)?$/], example: 'docker builder prune' });
+  s.command([/^docker system prune(?: -a| --all)?(?: -f| --force)?$/], async (_, m) => {
+    const all = /-a/.test(m.input);
+    await sweep('containers', (c) => !c.running, 'docker container prune', '');
+    await sweep('images', (i) => (all ? !usedImages().has(i.id) : i.dangling), all ? 'docker image prune -a' : 'docker image prune', '');
+    await sweep('cache', () => true, 'docker builder prune', '');
+    s.say(`<code>${escapeHtml(m.input)}</code> = stopped containers + ${all ? 'all unused' : 'dangling'} images + build cache (+ unused networks). <b>Volumes are kept</b> unless you add <code>--volumes</code>.`);
+  }, { example: 'docker system prune' });
+  s.command([/^docker system df$/], async () => {
+    const sum = (k) => fmtMB(st[k].reduce((n, x) => n + x.mb, 0));
+    s.say(`TYPE / SIZE — Images <b>${sum('images')}</b> · Containers <b>${sum('containers')}</b> · Volumes <b>${sum('volumes')}</b> · Build cache <b>${sum('cache')}</b>`);
+  }, { example: 'docker system df' });
   s.btn('↺ Reset', async () => { st = INITIAL(); render(); s.say('Reset. Light-blue items are in use; orange are dangling.'); });
   render();
   s.say('Light-blue items are <b>in use</b> by a container. Orange images are <b>dangling</b>.');
@@ -1040,7 +1237,10 @@ A.multiStage = (root) => {
     await wait(300);
     setBar(bars.multi, 1.3); vals.multi.textContent = '~11 MB';
     s.say('The final image contains <b>only stage 2</b>: about <b>80× smaller</b>, no compiler, no shell, no source code.');
-  }, { primary: true });
+  }, { primary: true, cmd: [/^docker (?:image |buildx )?build (?:(?:-t|--tag) [\w.:\/-]+ )?\.$/], example: 'docker build -t myapp .' });
+  s.command([/^docker (?:image )?build --target build (?:(?:-t|--tag) [\w.:\/-]+ )?\.$/], async () => {
+    s.say('<code>--target build</code> stops after stage 1 — you get the <b>big builder image</b> (~870 MB), handy for running tests with the toolchain.');
+  }, { example: 'docker build --target build -t myapp:builder .' });
   s.btn('Reset', async () => { reset(); s.say('Reset.'); });
   reset();
 };
@@ -1061,32 +1261,43 @@ A.registry = (root) => {
   const server = h('div', { class: 'node' }, title('🖥 Server', 'production'), zone('Layers', srvBox));
   s.stage.append(h('div', { class: 'reg-scene' }, laptop, registry, server), term);
 
-  let tagged = false, logged = false, version = '1.0', codeId = randomHex(8);
+  let tagged = false, logged = false, version = '1.0', codeId = randomHex(8), user = 'kunal';
+  const remote = () => `${user}/myapp:${version}`;
   const regLayers = new Set(), srvLayers = new Set(), pushed = new Set();
   const layers = () => [['alpine base', '7 MB', 'base0001'], ['dependencies', '35 MB', 'deps0002'], ['your code', '2 MB', codeId]];
   const render = () => {
-    tagsEl.replaceChildren(h('span', { class: 'chip' }, `myapp:${version}`), tagged && h('span', { class: 'chip blue pop' }, `kunal/myapp:${version}`));
+    tagsEl.replaceChildren(h('span', { class: 'chip' }, `myapp:${version}`), tagged && h('span', { class: 'chip blue pop' }, remote()));
     layerBox.replaceChildren(...layers().map(([n, sz, id]) => h('div', { class: 'layer', 'data-id': id }, `${n} · ${sz}`)));
     regBox.replaceChildren(...[...regLayers].map((id) => h('span', { class: 'chip light' }, id.slice(0, 8))));
     regTags.replaceChildren(...[...pushed].map((t) => h('span', { class: 'chip blue' }, t)));
     srvBox.replaceChildren(...[...srvLayers].map((id) => h('span', { class: 'chip light' }, id.slice(0, 8))));
   };
 
-  s.btn('docker tag', async () => {
-    typed(term, `docker tag myapp:${version} kunal/myapp:${version}`);
+  s.btn('docker tag', async (_, m) => {
+    if (m) {
+      if (m[1] !== version) return s.say(`<span class="err">Error: No such image: myapp:${escapeHtml(m[1])}</span> — the local image is <code>myapp:${version}</code>.`);
+      user = m[2];
+      if (m[3] !== version) return s.say(`Tip: keep the same tag — use <code>docker tag myapp:${version} ${user}/myapp:${version}</code>.`);
+    }
+    typed(term, `docker tag myapp:${version} ${remote()}`);
     tagged = true;
     render();
-    s.say('A second <b>name</b> for the same image ID. The <code>kunal/</code> prefix says which Docker Hub account to push to.');
-  }, { mono: true, enabled: () => !tagged });
+    s.say(`A second <b>name</b> for the same image ID. The <code>${user}/</code> prefix says which Docker Hub account to push to.`);
+  }, { mono: true, enabled: () => !tagged, cmd: [/^docker (?:image )?tag myapp:([\w.]+) ([a-z0-9][a-z0-9_-]*)\/myapp:([\w.]+)$/], example: 'docker tag myapp:1.0 yourname/myapp:1.0' });
   s.btn('docker login', async () => {
     typed(term, 'docker login');
     out(term, '<span class="ok">Login Succeeded</span>');
     logged = true;
     s.say('Logged in. Credentials are stored by your credential helper.');
-  }, { mono: true, enabled: () => !logged });
-  s.btn('docker push', async () => {
-    typed(term, `docker push kunal/myapp:${version}`);
-    if (!tagged) { out(term, '<span class="bad">An image does not exist locally with the tag: kunal/myapp</span>'); return s.say('Push needs a name with your account prefix. <b>Tag it first.</b>'); }
+  }, { mono: true, enabled: () => !logged, cmd: [/^docker login(?: -u \S+)?(?: docker\.io)?$/] });
+  s.btn('docker push', async (_, m) => {
+    if (m && (m[1] !== user || m[2] !== version)) {
+      typed(term, m.input);
+      out(term, `<span class="bad">An image does not exist locally with the tag: ${escapeHtml(m[1])}/myapp:${escapeHtml(m[2])}</span>`);
+      return s.say(tagged ? `Your tagged image is <code>${remote()}</code>.` : 'Push needs a name with your account prefix. <b>Tag it first.</b>');
+    }
+    typed(term, `docker push ${remote()}`);
+    if (!tagged) { out(term, `<span class="bad">An image does not exist locally with the tag: ${user}/myapp</span>`); return s.say('Push needs a name with your account prefix. <b>Tag it first.</b>'); }
     if (!logged) { out(term, '<span class="bad">denied: requested access to the resource is denied</span>'); return s.say('The registry does not know who you are. <b>Log in first.</b>'); }
     let sent = 0;
     for (const [n, , id] of layers()) {
@@ -1097,13 +1308,13 @@ A.registry = (root) => {
       out(term, `${id.slice(0, 8)}: <span class="ok">Pushed</span>`);
       render();
     }
-    pushed.add(`kunal/myapp:${version}`);
+    pushed.add(remote());
     out(term, `${version}: digest: sha256:${randomHex(16)}… size: 1157`);
     render();
     s.say(sent === 3 ? 'All 3 layers uploaded.' : `Only <b>${sent}</b> layer uploaded — the registry already had the others. Layers are <b>de-duplicated</b>.`);
-  }, { mono: true, primary: true });
+  }, { mono: true, primary: true, cmd: [/^docker (?:image )?push ([a-z0-9][a-z0-9_-]*)\/myapp:([\w.]+)$/], example: 'docker push yourname/myapp:1.0' });
   s.btn('server: docker pull', async () => {
-    typed(term, `ssh server docker pull kunal/myapp:${version}`);
+    typed(term, `ssh server docker pull ${remote()}`);
     for (const [n, , id] of layers()) {
       if (srvLayers.has(id)) { out(term, `${id.slice(0, 8)}: <span class="dim">Already exists</span>`); continue; }
       await fly(s.stage, registry, server, { label: n, ms: 800 });
@@ -1111,13 +1322,13 @@ A.registry = (root) => {
       out(term, `${id.slice(0, 8)}: <span class="ok">Pull complete</span>`);
       render();
     }
-    s.say(`The server now has <b>kunal/myapp:${version}</b> and can <code>docker run</code> it.`);
-  }, { mono: true, enabled: () => pushed.has(`kunal/myapp:${version}`) });
+    s.say(`The server now has <b>${remote()}</b> and can <code>docker run</code> it.`);
+  }, { mono: true, enabled: () => pushed.has(remote()), why: () => `The registry doesn't have <b>${remote()}</b> yet — push it first.`, cmd: [/^(?:ssh server )?docker (?:image )?pull ([a-z0-9][a-z0-9_-]*)\/myapp:([\w.]+)$/], example: 'ssh server docker pull yourname/myapp:1.0' });
   s.btn('✎ change code → 1.1', async () => {
     version = '1.1'; codeId = randomHex(8); tagged = false;
     render();
     s.say('Rebuilt as <b>myapp:1.1</b>. Only the code layer changed. Tag and push again and count the uploads.');
-  }, { enabled: () => version === '1.0' && pushed.size > 0 });
+  }, { enabled: () => version === '1.0' && pushed.size > 0, cmd: [/^docker (?:image )?build (?:-t|--tag) myapp:1\.1 \.$/], example: 'docker build -t myapp:1.1 .' });
   render();
 };
 
@@ -1215,12 +1426,58 @@ A.resources = (root) => {
     logLine('stopped by user');
     s.say(policy.value === 'always' ? 'Stopped by you. <b>always</b> would start it again when the Docker daemon restarts; <b>unless-stopped</b> would not.' : 'Stopped by you — no restart policy restarts a manually stopped container.');
     render();
-  }, { mono: true, enabled: () => st.state === 'running' });
+  }, { mono: true, enabled: () => st.state === 'running', why: 'myapp is not running.', cmd: [/^docker (?:container )?stop myapp$/], example: 'docker stop myapp' });
   s.btn('docker start', async () => {
     Object.assign(st, { state: 'running', byUser: false, mem: 80, health: 'starting', fails: 0 });
     logLine('started');
     render();
-  }, { mono: true, enabled: () => st.state !== 'running' });
+    s.say('Started again with the same limits and restart policy.');
+  }, { mono: true, enabled: () => st.state !== 'running', why: 'myapp is already running.', cmd: [/^docker (?:container )?(?:start|restart) myapp$/], example: 'docker start myapp' });
+
+  // Reads --memory / --cpus / --restart out of a typed command and moves the sliders to match.
+  const applyFlags = (flags) => {
+    const mem = flags.match(/(?:--memory|-m)[ =](\d+(?:\.\d+)?)([mg])/);
+    const cpu = flags.match(/--cpus[ =](\d+(?:\.\d+)?)/);
+    const rp = flags.match(/--restart[ =]([\w-]+)(?::\d+)?/);
+    const notes = [];
+    if (mem) {
+      const mb = Math.round(Number(mem[1]) * (mem[2] === 'g' ? 1024 : 1));
+      memLimit.value = Math.max(128, Math.min(1024, Math.round(mb / 64) * 64));
+      if (String(mb) !== memLimit.value) notes.push(`memory snapped to ${memLimit.value}m (demo range 128m–1g)`);
+    }
+    if (cpu) {
+      cpus.value = Math.max(0.5, Math.min(4, Math.round(Number(cpu[1]) * 2) / 2));
+      if (Number(cpu[1]) !== Number(cpus.value)) notes.push(`cpus snapped to ${cpus.value}`);
+    }
+    if (rp) {
+      if (![...policy.options].some((o) => o.value === rp[1])) return `<span class="err">invalid restart policy "${escapeHtml(rp[1])}"</span> — use no, on-failure, always or unless-stopped`;
+      policy.value = rp[1];
+    }
+    render();
+    s.refresh();
+    return notes.length ? ` (${notes.join(', ')})` : '';
+  };
+  s.command([/^docker (?:container )?run (?:-d )?(.*?)myapp$/], async (_, m) => {
+    const note = applyFlags(m[1]);
+    if (note.startsWith('<span')) return s.say(note);
+    Object.assign(st, { state: 'running', byUser: false, mem: 80, health: 'starting', fails: 0, restarts: 0, broken: false });
+    breakBtn.textContent = '💔 Break health endpoint';
+    logLine(`started with --memory ${memLimit.value}m --cpus ${cpus.value} --restart ${policy.value}`);
+    render();
+    s.say(`New container running with your limits${note}. Now push the <b>app load</b> slider up and watch memory.`);
+  }, { example: 'docker run -d --memory 256m --cpus 1 --restart always myapp' });
+  s.command([/^docker (?:container )?update (.+?) myapp$/], async (_, m) => {
+    const note = applyFlags(m[1]);
+    if (note.startsWith('<span')) return s.say(note);
+    logLine(`limits updated live: --memory ${memLimit.value}m --cpus ${cpus.value}`);
+    s.say(`<b>docker update</b> changed the limits of the <b>running</b> container — no restart needed${note}.`);
+  }, { example: 'docker update --memory 768m --cpus 2 myapp' });
+  s.command([/^docker (?:container )?stats(?: --no-stream)?(?: myapp)?$/], async () => {
+    s.say(`myapp — CPU <b>${st.cpu.toFixed(2)}</b> of ${cpus.value} cores · MEM <b>${Math.round(st.mem)}MiB / ${memLimit.value}MiB</b> · state <b>${st.state}</b>`);
+  }, { example: 'docker stats myapp' });
+  s.command([/^docker (?:container )?inspect (?:(?:--format|-f) .* )?myapp$/], async () => {
+    s.say(`State: <b>${st.state}</b> · Health: <b>${st.state === 'running' ? st.health : '—'}</b> · RestartCount: <b>${st.restarts}</b> · RestartPolicy: <b>${policy.value}</b>`);
+  }, { example: "docker inspect --format '{{.State.Health.Status}}' myapp" });
   [memLimit, cpus, load, policy].forEach((el) => el.addEventListener('input', () => { render(); s.refresh(); }));
   every(() => s.refresh(), 700);
   render();
@@ -1273,6 +1530,27 @@ A.security = (root) => {
     core.style.boxShadow = `0 0 0 ${on.size * 2}px var(--blue-100), 0 0 0 ${on.size * 2 + 2}px var(--blue)`;
     s.say(on.size === P.length ? '<b>All practices on.</b> Small image, no root, no secrets, locked-down runtime, continuous scanning. 🛡' : `${on.size} of ${P.length} practices enabled. Each one removes a whole class of attacks.`);
   };
+  const setPractice = (id, value) => {
+    const idx = P.findIndex((p) => p[0] === id);
+    const cb = list.querySelectorAll('input')[idx];
+    cb.checked = value;
+    value ? on.add(id) : on.delete(id);
+    update(id, value);
+  };
+  s.command([/^docker (?:container )?run (.*?)myapp$/], async (_, m) => {
+    const f = m[1];
+    const hits = [];
+    if (/--read-only/.test(f)) { setPractice('ro', true); hits.push('read-only filesystem'); }
+    if (/--cap-drop[ =]all/.test(f)) { setPractice('caps', true); hits.push('no capabilities'); }
+    if (/(?:--user|-u)[ =]\S+/.test(f)) { setPractice('user', true); hits.push('non-root user'); }
+    if (/--privileged|docker\.sock/.test(f)) { setPractice('priv', false); return s.say('<span class="err">--privileged / docker.sock gives the container root on the host</span> — the score drops. Never do this for untrusted code.'); }
+    if (!/--privileged|docker\.sock/.test(f) && hits.length) setPractice('priv', true);
+    s.say(hits.length ? `Runtime hardening applied: <b>${hits.join(', ')}</b>.` : 'Started with default settings — try adding <code>--read-only --cap-drop ALL --user 1000</code>.');
+  }, { example: 'docker run --read-only --cap-drop ALL --user 1000 myapp' });
+  s.command([/^docker scout (?:cves|quickview) myapp(?::[\w.-]+)?$/, /^trivy image myapp(?::[\w.-]+)?$/], async () => {
+    setPractice('scan', true);
+    s.say(`Scan finished: <b>${on.has('base') ? 12 : 112} known CVEs</b> left. Scanning in CI catches new ones before they ship.`);
+  }, { example: 'docker scout cves myapp' });
   s.btn('Enable all', async () => { list.querySelectorAll('input').forEach((cb, i) => { cb.checked = true; on.add(P[i][0]); update(P[i][0], true); }); }, { primary: true });
   s.btn('Reset', async () => { list.querySelectorAll('input').forEach((cb, i) => { cb.checked = false; on.delete(P[i][0]); update(P[i][0], false); }); });
   update();
@@ -1317,15 +1595,19 @@ A.swarm = (root) => {
     renderHeader();
   };
 
-  s.btn('+ scale up', async () => { desired++; renderHeader(); await reconcile(); s.say(`<code>docker service scale web=${desired}</code> — the scheduler places new tasks on the <b>least busy</b> nodes.`); }, { enabled: () => desired < 9 });
-  s.btn('− scale down', async () => { desired--; renderHeader(); await reconcile(); s.say(`<code>docker service scale web=${desired}</code>`); }, { enabled: () => desired > 1 });
-  s.btn('💥 kill worker-1', async () => {
-    const n = nodes[1];
+  const scaleTo = async (n) => {
+    desired = Math.max(1, Math.min(9, n));
+    renderHeader();
+    await reconcile();
+    s.say(`<code>docker service scale web=${desired}</code> — the scheduler places new tasks on the <b>least busy</b> nodes.${n > 9 ? ' (This demo caps it at 9.)' : ''}`);
+  };
+  const drain = async (n) => {
+    if (nodes.filter((x) => x.up && x !== n).length === 0) return s.say('<span class="err">Refusing to take down the last available node</span> — nothing could run the tasks.');
     n.up = false;
     n.el.classList.add('down');
     const lost = tasks.filter((t) => t.node === n);
     lost.forEach((t) => flash(t.el, 'shake'));
-    s.say(`<b>worker-1</b> went down with ${lost.length} task(s). Actual state ≠ desired state…`);
+    s.say(`<b>${n.name}</b> went down with ${lost.length} task(s). Actual state ≠ desired state…`);
     await wait(700);
     renderHeader();
     for (const t of lost) {
@@ -1336,12 +1618,25 @@ A.swarm = (root) => {
       renderHeader();
     }
     s.say(`The orchestrator <b>rescheduled</b> ${lost.length} task(s) onto healthy nodes. Running = desired again — no human needed.`);
-  }, { enabled: () => nodes[1].up });
-  s.btn('↺ recover worker-1', async () => {
-    nodes[1].up = true;
-    nodes[1].el.classList.remove('down');
-    s.say('worker-1 is back. Swarm does not move running tasks back automatically; new tasks will use it.');
-  }, { enabled: () => !nodes[1].up });
+  };
+  const recover = async (n) => {
+    n.up = true;
+    n.el.classList.remove('down');
+    s.say(`${n.name} is back. Swarm does not move running tasks back automatically; new tasks will use it.`);
+  };
+  const nodeBy = (name) => nodes.find((x) => x.name === name);
+
+  s.btn('+ scale up', () => scaleTo(desired + 1), { enabled: () => desired < 9 });
+  s.btn('− scale down', () => scaleTo(desired - 1), { enabled: () => desired > 1 });
+  s.command([/^docker service scale web=(\d+)$/, /^docker service update --replicas[ =](\d+) web$/], (_, m) => scaleTo(Number(m[1])), { example: 'docker service scale web=6' });
+  s.btn('💥 kill worker-1', () => drain(nodes[1]), { enabled: () => nodes[1].up });
+  s.btn('↺ recover worker-1', () => recover(nodes[1]), { enabled: () => !nodes[1].up });
+  s.command([/^docker node update --availability[ =](drain|pause|active) (manager-1|worker-1|worker-2)$/], async (_, m) => {
+    const n = nodeBy(m[2]);
+    if (m[1] === 'active') return n.up ? s.say(`${n.name} is already active.`) : recover(n);
+    if (!n.up) return s.say(`${n.name} is already unavailable.`);
+    return drain(n);
+  }, { example: 'docker node update --availability drain worker-2' });
   s.btn('⟳ rolling update → v2', async () => {
     version = 'v2';
     renderHeader();
@@ -1356,6 +1651,12 @@ A.swarm = (root) => {
       await wait(500);
     }
     s.say('All tasks updated <b>one by one</b> — the service never went fully down.');
-  }, { primary: true, enabled: () => version === 'v1' });
+  }, { primary: true, enabled: () => version === 'v1', cmd: [/^docker service update (?:--update-parallelism \d+ )?--image web:v2 web$/], example: 'docker service update --image web:v2 web' });
+  s.command([/^docker service ps web$/], async () => {
+    s.say(tasks.map((t) => `<code>web.${t.id}</code> ${t.ver} on <b>${t.node.name}</b>`).join(' · ') || 'No tasks.');
+  }, { example: 'docker service ps web' });
+  s.command([/^docker node ls$/], async () => {
+    s.say(nodes.map((n) => `<b>${n.name}</b> ${n.up ? 'Ready · Active' : '<span class="err">Drain</span>'}`).join(' · '));
+  }, { example: 'docker node ls' });
   reconcile().then(() => s.refresh());
 };
