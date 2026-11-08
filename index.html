@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light only" />
+  <title>Docker Lab — Learn Docker Visually</title>
+  <meta name="description" content="Learn Docker from zero to advanced with interactive animations, explained commands, explained files, quizzes and a live playground." />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open lessons menu">☰</button>
+    <a class="brand" href="#/">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span>Docker<b>Lab</b></span>
+    </a>
+    <nav class="top-links">
+      <a href="#/" data-nav="home">Roadmap</a>
+      <a href="#/playground" data-nav="playground">Playground</a>
+      <a href="#/cheatsheet" data-nav="cheatsheet">Cheat sheet</a>
+    </nav>
+    <div class="top-right">
+      <label class="speed" title="Animation speed">
+        <span>Speed</span>
+        <select id="speedSel">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+      <div class="progress-pill" id="progressPill" title="Lessons completed">0%</div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar" aria-label="Lessons"></aside>
+    <div class="scrim" id="scrim"></div>
+    <main class="main" id="view" tabindex="-1"></main>
+  </div>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
