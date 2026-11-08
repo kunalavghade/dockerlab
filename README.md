@@ -2,7 +2,7 @@
 
 An interactive website that teaches Docker from zero to advanced. Every concept has an animation you can play with, every command is explained flag by flag, and every file is explained line by line.
 
-**Live site:** https://kunalavghade.github.io/docker.github.io/
+**Live site:** https://kunalavghade.github.io/dockerlab/
 
 ## What's inside
 
@@ -29,7 +29,9 @@ Then open http://localhost:8000.
 
 ## Deploy on GitHub Pages
 
-Push to `main`, then in the repository go to **Settings → Pages → Build and deployment**, choose **Deploy from a branch**, and select `main` / `/ (root)`.
+Deployment is automatic: every push to `main` runs [.github/workflows/pages.yml](.github/workflows/pages.yml), which checks the JavaScript and publishes the site.
+
+One-time setup: in the repository go to **Settings → Pages → Build and deployment** and set **Source** to **GitHub Actions**.
 
 ## Project layout
 
