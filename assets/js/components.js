@@ -139,12 +139,14 @@ export const scene = (root, { title, hint = '' }) => {
     h('span', { class: 'p' }, '$'), input, h('button', { class: 'btn btn-sm btn-primary', type: 'submit' }, 'Run ↵'));
   const hints = h('div', { class: 'cmd-hints', style: { display: 'none' } });
 
-  root.append(h('div', { class: 'scene' },
+  const sceneEl = h('div', { class: 'scene' },
     h('div', { class: 'scene-head' }, h('span', { class: 'scene-dot' }), title, h('span', { class: 'scene-tag' }, 'Interactive')),
     stage, term, hints, controls, cap,
-  ));
+  );
+  root.append(sceneEl);
 
   let busy = false;
+  let queued = null; // a command typed while an animation was running
   const buttons = [];
   const commands = []; // { patterns: RegExp[], fn, enabled, example }
   const typedHistory = [];
@@ -158,6 +160,7 @@ export const scene = (root, { title, hint = '' }) => {
       ...live.map((c) => h('button', { type: 'button', class: 'hint', onclick: () => { input.value = c.example; input.focus(); } }, c.example)));
   };
   const refresh = () => {
+    sceneEl.classList.toggle('busy', busy);
     buttons.forEach(({ b, enabled }) => { b.disabled = busy || !isOn(enabled); });
     renderHints();
   };
@@ -196,7 +199,11 @@ export const scene = (root, { title, hint = '' }) => {
       if (!line) return;
       if (typedHistory[typedHistory.length - 1] !== line) typedHistory.push(line);
       hIdx = typedHistory.length;
-      if (busy) return api.say('<span class="err">Wait for the current animation to finish, then try again.</span>');
+      if (busy) {
+        queued = raw;
+        input.value = '';
+        return api.say(`<span class="dim">Queued <code>${escapeHtml(line)}</code> — it runs as soon as the current animation finishes.</span>`);
+      }
       for (const c of commands) {
         const m = c.patterns.map((p) => line.match(p)).find(Boolean);
         if (!m) continue;
@@ -217,7 +224,11 @@ export const scene = (root, { title, hint = '' }) => {
       if (busy) return;
       busy = true;
       refresh();
-      try { await fn(); } finally { busy = false; refresh(); }
+      try { await fn(); } finally {
+        busy = false;
+        refresh();
+        if (queued) { const next = queued; queued = null; setTimeout(() => api.exec(next), 0); }
+      }
     },
   };
 

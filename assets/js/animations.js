@@ -15,6 +15,7 @@ const fmtMB = (mb) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 1 ? `
 const title = (text, small) => h('div', { class: 'node-title' }, text, small && h('small', {}, small));
 const zone = (label, body) => h('div', { class: 'zone' }, h('div', { class: 'zone-title' }, label), body);
 const rand = (a, b) => a + Math.random() * (b - a);
+export const helpers = { mkTerm, out, typed, mkBar, setBar, fmtMB, title, zone, rand };
 
 // =====================================================================
 // 1. VMs vs containers
@@ -1114,6 +1115,58 @@ A.compose = (root) => {
   };
   s.btn('docker compose down', () => down(false), { mono: true, enabled: () => up, why: 'The stack is already down.', cmd: [/^docker[ -]compose down$/] });
   s.btn('down -v', () => down(true), { mono: true, enabled: () => up, why: 'The stack is already down.', cmd: [/^docker[ -]compose down (?:-v|--volumes)$/], example: 'docker compose down -v' });
+
+  // ---- everyday compose workflow (typed only) ----
+  const pick = (svc) => svcs.filter((x) => !svc || x.name.includes(`-${svc}-`));
+  const setState = (list, state) => list.forEach((x) => {
+    x.status.textContent = state;
+    x.el.querySelector('.status-dot').className = `status-dot ${state === 'running' ? 'running' : state === 'paused' ? 'paused' : 'exited'}`;
+    flash(x.el);
+  });
+  const lifecycle = (verb, state) => s.command([new RegExp(`^docker[ -]compose ${verb}(?: (web|api|db))?$`)], async (_, m) => {
+    typed(term, m.input);
+    const list = pick(m[1]);
+    for (const x of list) { setState([x], state); out(term, ` ✔ Container ${x.name}  <span class="ok">${verb === 'stop' ? 'Stopped' : verb === 'pause' ? 'Paused' : 'Started'}</span>`); await wait(250); }
+    s.say({ stop: 'Stopped, but <b>not removed</b>: containers, network and volume stay. <code>docker compose start</code> brings them back.', start: 'Started the existing containers again — <code>start</code> never creates new ones (that is <code>up</code>).', restart: 'Restarted. Note: restart does <b>not</b> apply edits to compose.yaml — use <code>up -d</code> for that.', pause: 'Frozen in place. <code>docker compose unpause</code> continues.', unpause: 'Running again.' }[verb]);
+  }, { enabled: () => up, why: 'Start the stack first: <code>docker compose up -d</code>', example: `docker compose ${verb}${verb === 'stop' ? ' api' : ''}` });
+  lifecycle('stop', 'exited');
+  lifecycle('start', 'running');
+  lifecycle('restart', 'running');
+  lifecycle('pause', 'paused');
+  lifecycle('unpause', 'running');
+
+  const EXEC = { 'ping db': 'PING db (172.18.0.2): 64 bytes from 172.18.0.2: seq=0 ttl=64 time=0.08 ms', 'ping api': 'PING api (172.18.0.3): 64 bytes from 172.18.0.3: seq=0 ttl=64 time=0.07 ms', ls: 'node_modules  package.json  server.js', env: 'DATABASE_URL=postgres://postgres:example@db:5432/app', 'psql -u postgres -c "select 1"': ' ?column?\n----------\n        1\n(1 row)', sh: '(interactive shell — try it for real in the Compose commands lab)' };
+  s.command([/^docker[ -]compose exec (web|api|db) (.+)$/], async (_, m) => {
+    typed(term, m.input);
+    const x = pick(m[1])[0];
+    if (x.status.textContent !== 'running') return s.say(`<span class="err">service "${m[1]}" is not running</span> — <code>docker compose start ${m[1]}</code>`);
+    flash(x.el);
+    out(term, escapeHtml(EXEC[m[2]] || `(ran "${m[2]}" inside ${x.name})`).replace(/\\n/g, '\n'));
+    s.say(`<code>exec</code> runs <b>inside the existing</b> ${m[1]} container — use the service name, no <code>-it</code> needed. Service names resolve on the project network.`);
+  }, { enabled: () => up, why: 'Nothing is running — <code>docker compose up -d</code> first.', example: 'docker compose exec api ping db' });
+  s.command([/^docker[ -]compose run (?:--rm )?(api|web|db)(?: (.+))?$/], async (_, m) => {
+    typed(term, m.input);
+    const name = `myapp-${m[1]}-run-${Math.random().toString(16).slice(2, 8)}`;
+    const el = h('div', { class: 'svc pop', style: { borderStyle: 'dashed' } }, h('span', { class: 'status-dot running' }), ` ${name}`, h('small', {}, 'one-off'), h('small', {}, m[2] || 'default command'));
+    net.append(el);
+    await wait(900);
+    out(term, escapeHtml(m[2] === 'node --version' ? 'v20.18.0' : m[2] ? `(output of ${m[2]})` : 'Listening on :3000'));
+    const rm = /--rm/.test(m.input);
+    if (rm) await removeAnimated(el); else { el.querySelector('.status-dot').className = 'status-dot exited'; }
+    s.say(`<code>run</code> makes a <b>new one-off container</b> from the ${m[1]} service config (dependencies started, ports <b>not</b> published).${rm ? ' <code>--rm</code> removed it afterwards.' : ' Without <code>--rm</code> it stays behind — add --rm next time.'}`);
+  }, { enabled: () => up, why: 'Start the stack first: <code>docker compose up -d</code>', example: 'docker compose run --rm api node --version' });
+  s.command([/^docker[ -]compose config(?: --services)?$/], async (_, m) => {
+    typed(term, m.input);
+    if (/--services/.test(m.input)) ['db', 'api', 'web'].forEach((x) => out(term, x));
+    else out(term, 'name: myapp\nservices:\n  api: { build: ./api, depends_on: { db: { condition: service_healthy } } }\n  db: { image: postgres:16, volumes: [pgdata:/var/lib/postgresql/data] }\n  web: { image: nginx:1.27, ports: ["8080:80"] }');
+    s.say('<code>config</code> validates the file and prints what Compose will really use — after defaults, merges and variable substitution.');
+  }, { example: 'docker compose config --services' });
+  s.command([/^docker[ -]compose (build|pull)$/], async (_, m) => {
+    typed(term, m.input);
+    if (m[1] === 'build') { out(term, ' => [api] building ./api'); await wait(600); out(term, ' ✔ Service api  <span class="ok">Built</span>'); }
+    else { out(term, ' - api Skipped - No image to be pulled'); out(term, ' ✔ db  <span class="ok">Pulled</span>'); out(term, ' ✔ web <span class="ok">Pulled</span>'); }
+    s.say(m[1] === 'build' ? 'Only services with a <code>build:</code> section are built — here just api.' : 'Pulls image-based services; build-only services are skipped. Then <code>up -d</code> recreates on the new images.');
+  }, { example: 'docker compose build' });
 };
 
 // =====================================================================

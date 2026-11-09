@@ -2,8 +2,11 @@
 import { h, store, copyText, disposeTimers, getSpeed, setSpeed } from './dom.js';
 import { LEVELS, LESSONS, CHEATSHEET } from './lessons.js';
 import { ANIMATIONS } from './animations.js';
+import './animations-more.js';
 import { commandBlock, fileBlock, quizBlock } from './components.js';
 import { renderPlayground } from './playground.js';
+import { renderCommandIndex, renderCommandPage, commandSidebar, entryFor } from './commands.js';
+import { REFERENCE } from './reference.js';
 
 const view = document.getElementById('view');
 const sidebar = document.getElementById('sidebar');
@@ -26,6 +29,11 @@ const renderProgress = () => {
 };
 
 const renderSidebar = (activeId = currentLessonId()) => {
+  if (location.hash.startsWith('#/commands')) {
+    return sidebar.replaceChildren(
+      h('div', { class: 'side-level side-extra' }, h('a', { class: 'side-link', href: '#/' }, h('span', { class: 'side-num' }, '←'), 'Lessons'), h('a', { class: `side-link ${activeId === 'commands' ? 'active' : ''}`, href: '#/commands' }, h('span', { class: 'side-num' }, '≡'), `All ${REFERENCE.length} commands`)),
+      ...commandSidebar(activeId));
+  }
   const levels = LEVELS.map((lvl) => {
     const lessons = LESSONS.filter((l) => l.level === lvl.id);
     const count = lessons.filter((l) => done.has(l.id)).length;
@@ -38,6 +46,7 @@ const renderSidebar = (activeId = currentLessonId()) => {
   });
   sidebar.replaceChildren(...levels,
     h('div', { class: 'side-level side-extra' },
+      h('a', { class: `side-link ${activeId === 'commands' ? 'active' : ''}`, href: '#/commands' }, h('span', { class: 'side-num' }, '📚'), `Command reference (${REFERENCE.length})`),
       h('a', { class: `side-link ${activeId === 'playground' ? 'active' : ''}`, href: '#/playground' }, h('span', { class: 'side-num' }, '▶'), 'Playground'),
       h('a', { class: `side-link ${activeId === 'cheatsheet' ? 'active' : ''}`, href: '#/cheatsheet' }, h('span', { class: 'side-num' }, '≡'), 'Cheat sheet')));
 };
@@ -54,6 +63,7 @@ const renderHome = () => {
       h('p', {}, 'Every concept is an animation you can play with. Every command is broken down flag by flag. Every file is explained line by line. Then practice in a live playground.'),
       h('div', { class: 'hero-actions' },
         h('a', { class: 'btn btn-primary', href: `#/lesson/${next.id}` }, done.size ? `Continue: ${next.title} →` : 'Start learning →'),
+        h('a', { class: 'btn', href: '#/commands' }, '📚 Command reference'),
         h('a', { class: 'btn', href: '#/playground' }, '▶ Open playground')),
       h('div', { class: 'hero-ship', 'aria-hidden': 'true' },
         h('div', { class: 'boxes' }, Array.from({ length: 10 }, (_, i) => h('i', { class: i % 3 === 0 ? 'b' : '', style: { animationDelay: `${0.2 + i * 0.12}s` } }))),
@@ -62,6 +72,7 @@ const renderHome = () => {
       [['🎬 Animations', 'Click buttons — or type the real docker command — and watch containers, layers, ports and networks move.'],
         ['🔍 Explained commands', 'Hover any part of a command to see exactly what it does.'],
         ['📄 Explained files', 'Dockerfile, compose.yaml, .dockerignore — line by line.'],
+        ['📚 Every command', `${REFERENCE.length} commands, each with options, examples, errors and a live lab.`],
         ['🧪 Playground', 'A simulated Docker engine with challenges. Safe to break.']]
         .map(([b, t]) => h('div', { class: 'feature' }, h('b', {}, b), h('span', {}, t)))),
     ...LEVELS.flatMap((lvl) => [
@@ -102,6 +113,16 @@ const BLOCKS = {
   },
 };
 
+// Every reference page that names this lesson, as links to the full command docs and labs.
+const lessonCommands = (lessonId) => {
+  const refs = REFERENCE.filter((r) => r.lesson === lessonId);
+  if (!refs.length) return null;
+  return h('section', { class: 'lesson-refs' },
+    h('h3', {}, '📚 Every command from this lesson, in depth'),
+    h('p', {}, 'Each page explains every option and has its own live lab.'),
+    h('div', { class: 'chips' }, refs.map((r) => h('a', { class: 'chip light', href: `#/commands/${r.id}` }, r.cmd))));
+};
+
 const renderLesson = (id) => {
   const idx = LESSONS.findIndex((l) => l.id === id);
   if (idx < 0) return renderNotFound();
@@ -121,6 +142,7 @@ const renderLesson = (id) => {
       h('p', { class: 'lead' }, l.summary),
       h('div', { class: 'learn-box' }, h('h4', {}, 'You will learn'), h('ul', {}, l.learn.map((t) => h('li', {}, t))))),
     l.blocks.map(([type, data]) => (BLOCKS[type] ? BLOCKS[type](data) : null)),
+    lessonCommands(l.id),
     quizBlock(l.quiz, () => { if (!done.has(l.id)) { markDone(l.id); syncComplete(); } }),
     h('div', { class: 'complete-row' }, h('span', {}, 'Answer every quiz question correctly to complete the lesson automatically — or mark it yourself.'), completeBtn),
     h('nav', { class: 'lesson-foot' },
@@ -138,12 +160,16 @@ const renderCheatsheet = () => {
     grid.replaceChildren(...CHEATSHEET.map((g) => {
       const items = g.items.filter(([c, d]) => !needle || c.toLowerCase().includes(needle) || d.toLowerCase().includes(needle));
       return items.length ? h('section', { class: 'cs-group' }, h('h3', {}, g.group),
-        items.map(([c, d]) => h('div', { class: 'cs-item', title: 'Click to copy', onclick: () => copyText(c) }, h('code', {}, c), h('span', {}, d)))) : null;
+        items.map(([c, d]) => {
+          const ref = entryFor(c);
+          return h('div', { class: 'cs-item', title: 'Click to copy', onclick: () => copyText(c) }, h('code', {}, c), h('span', {}, d,
+            ref ? h('a', { class: 'cs-ref', href: `#/commands/${ref.id}`, onclick: (e) => e.stopPropagation() }, ' details →') : null));
+        })) : null;
     }).filter(Boolean));
     if (!grid.children.length) grid.append(h('p', { class: 'pg-empty' }, 'No command matches your search.'));
   };
   view.append(h('div', { class: 'lesson', style: { maxWidth: '1200px' } },
-    h('div', { class: 'lesson-head' }, h('h1', {}, 'Docker cheat sheet'), h('p', { class: 'lead' }, 'The commands you will actually use. Click any command to copy it.')),
+    h('div', { class: 'lesson-head' }, h('h1', {}, 'Docker cheat sheet'), h('p', { class: 'lead', html: `The commands you will actually use. Click a command to copy it, or <b>details →</b> for its full page and live lab. All ${REFERENCE.length} commands: <a href="#/commands">command reference</a>.` })),
     h('input', { class: 'cs-search', type: 'search', placeholder: 'Search commands… (e.g. volume, logs, prune)', oninput: (e) => draw(e.target.value), 'aria-label': 'Search commands' }),
     grid));
   draw();
@@ -154,7 +180,7 @@ const renderNotFound = () => view.append(h('div', { class: 'lesson' }, h('h1', {
 // ---------- router ----------
 function currentLessonId() {
   const [, page, id] = location.hash.replace(/^#/, '').split('?')[0].split('/');
-  return page === 'lesson' ? id : page;
+  return page === 'lesson' || (page === 'commands' && id) ? id : page;
 }
 
 const route = () => {
@@ -168,6 +194,11 @@ const route = () => {
     case 'lesson': setTopNav(''); renderLesson(id); break;
     case 'playground': document.title = 'Playground — Docker Lab'; setTopNav('playground'); renderPlayground(view, new URLSearchParams(query).get('cmd')); break;
     case 'cheatsheet': setTopNav('cheatsheet'); renderCheatsheet(); break;
+    case 'commands':
+      setTopNav('commands');
+      if (!id) renderCommandIndex(view, new URLSearchParams(query).get('q') || '');
+      else if (!renderCommandPage(view, id)) renderNotFound();
+      break;
     default: renderNotFound();
   }
   renderSidebar(currentLessonId());
