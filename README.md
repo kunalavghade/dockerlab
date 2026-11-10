@@ -2,7 +2,9 @@
 
 An interactive website that teaches Docker from zero to advanced. Every concept has an animation you can play with, every command is explained flag by flag, and every file is explained line by line.
 
-**Live site:** https://kunalavghade.github.io/dockerlab/
+**Live site:** https://kunalavghade.github.io/dockerlab/ · **Author:** [Kunal Avghade (@kunalavghade)](https://github.com/kunalavghade)
+
+If it helps you, please ⭐ the repo so more people can find it.
 
 ## What's inside
 
@@ -74,3 +76,13 @@ Add an entry to one of the files in `assets/js/ref/` (shape documented in `asset
 1. Add an entry to `LESSONS` in `assets/js/lessons.js`, using blocks such as `['p', html]`, `['cmd', {...}]`, `['file', {...}]` and `['anim', 'key']`.
 2. If it needs a new animation, add `ANIMATIONS.key = (root) => { ... }` in `assets/js/animations.js`, using the `scene()` helper.
 3. To make a step typeable, pass `cmd` (a string or RegExp) to `s.btn(...)`, or register a command with no button using `s.command(patterns, fn, { enabled, example, why })`.
+
+## Search and link previews
+
+`index.html` carries the search and sharing tags: title, description, keywords, author, canonical URL, Open Graph and Twitter tags with `assets/og-image.png` (1200×630), and schema.org JSON-LD for the author, the site and the course. Each page also sets its own title and description through `setPage()` in `assets/js/dom.js`.
+
+To get indexed faster, add the site in [Google Search Console](https://search.google.com/search-console) and [Bing Webmaster Tools](https://www.bing.com/webmasters), then submit `https://kunalavghade.github.io/dockerlab/sitemap.xml`.
+
+## Author
+
+Made by **Kunal Avghade** — [github.com/kunalavghade](https://github.com/kunalavghade).

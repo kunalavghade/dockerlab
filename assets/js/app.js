@@ -1,5 +1,5 @@
 // App shell: hash router, sidebar, progress, and page renderers.
-import { h, store, copyText, disposeTimers, getSpeed, setSpeed } from './dom.js';
+import { h, store, copyText, disposeTimers, getSpeed, setSpeed, setPage, GITHUB_PROFILE, GITHUB_REPO } from './dom.js';
 import { LEVELS, LESSONS, CHEATSHEET } from './lessons.js';
 import { ANIMATIONS } from './animations.js';
 import './animations-more.js';
@@ -132,7 +132,7 @@ const renderLesson = (id) => {
   if (idx < 0) return renderNotFound();
   const l = LESSONS[idx];
   const prev = LESSONS[idx - 1], next = LESSONS[idx + 1];
-  document.title = `${l.title} — Docker Lab`;
+  setPage(`${l.title} — Docker tutorial | Docker Lab`, `${l.summary} An interactive Docker lesson with animations, explained commands and a quiz.`);
 
   const completeBtn = h('button', { class: `btn ${done.has(l.id) ? '' : 'btn-primary'}` });
   const syncComplete = () => { completeBtn.textContent = done.has(l.id) ? '✓ Completed (undo)' : 'Mark lesson complete'; completeBtn.className = `btn ${done.has(l.id) ? '' : 'btn-primary'}`; };
@@ -158,7 +158,7 @@ const renderLesson = (id) => {
 };
 
 const renderCheatsheet = () => {
-  document.title = 'Cheat sheet — Docker Lab';
+  setPage('Docker cheat sheet — every common command | Docker Lab', 'A searchable Docker cheat sheet: containers, images, volumes, networks, Compose, buildx and Swarm commands. Click to copy, or open the full explanation.');
   const grid = h('div', { class: 'cs-grid' });
   const draw = (q = '') => {
     const needle = q.trim().toLowerCase();
@@ -180,7 +180,22 @@ const renderCheatsheet = () => {
   draw();
 };
 
-const renderNotFound = () => view.append(h('div', { class: 'lesson' }, h('h1', {}, 'Page not found'), h('p', {}, h('a', { href: '#/' }, 'Back to the roadmap'))));
+// Author credit and project links, shown at the bottom of every page.
+const siteFooter = () => h('footer', { class: 'site-foot' },
+  h('div', { class: 'foot-author' },
+    h('a', { class: 'foot-avatar', href: GITHUB_PROFILE, target: '_blank', rel: 'noopener me' }, h('img', { src: `${GITHUB_PROFILE}.png?size=96`, alt: 'Kunal Avghade', width: 44, height: 44, loading: 'lazy' })),
+    h('div', {},
+      h('b', {}, 'Made by ', h('a', { href: GITHUB_PROFILE, target: '_blank', rel: 'noopener me author' }, 'Kunal Avghade')),
+      h('span', {}, 'Docker Lab is free and open source. If it helped you, a ⭐ on GitHub helps others find it.'))),
+  h('div', { class: 'foot-links' },
+    h('a', { class: 'btn', href: GITHUB_PROFILE, target: '_blank', rel: 'noopener me' }, '🐙 github.com/kunalavghade'),
+    h('a', { class: 'btn btn-primary', href: GITHUB_REPO, target: '_blank', rel: 'noopener' }, '⭐ Star on GitHub'),
+    h('a', { class: 'btn', href: `${GITHUB_REPO}/issues`, target: '_blank', rel: 'noopener' }, '🐞 Report an issue')));
+
+const renderNotFound = () => {
+  setPage('Page not found | Docker Lab');
+  view.append(h('div', { class: 'lesson' }, h('h1', {}, 'Page not found'), h('p', {}, h('a', { href: '#/' }, 'Back to the roadmap'))));
+};
 
 // ---------- router ----------
 function currentLessonId() {
@@ -195,9 +210,9 @@ const route = () => {
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?');
   const [, page, id] = path.split('/');
   switch (page || '') {
-    case '': document.title = 'Docker Lab — Learn Docker Visually'; setTopNav('home'); renderHome(); break;
+    case '': setPage('Docker Lab — Learn Docker Visually, From Beginner to Advanced'); setTopNav('home'); renderHome(); break;
     case 'lesson': setTopNav(''); renderLesson(id); break;
-    case 'playground': document.title = 'Playground — Docker Lab'; setTopNav('playground'); renderPlayground(view, new URLSearchParams(query).get('cmd')); break;
+    case 'playground': setPage('Docker playground — run docker commands in your browser | Docker Lab', 'Practise Docker in the browser with a simulated engine: run containers, build images, use Compose and Swarm, and complete 15 challenges. Nothing to install.'); setTopNav('playground'); renderPlayground(view, new URLSearchParams(query).get('cmd')); break;
     case 'cheatsheet': setTopNav('cheatsheet'); renderCheatsheet(); break;
     case 'commands':
       setTopNav('commands');
@@ -206,6 +221,7 @@ const route = () => {
       break;
     default: renderNotFound();
   }
+  view.append(siteFooter());
   renderSidebar(currentLessonId());
   window.scrollTo({ top: 0, behavior: 'instant' });
 };

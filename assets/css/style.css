@@ -721,3 +721,27 @@ a.cmd-link:hover code { background: var(--blue-100) !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- Author / GitHub ---------- */
+.gh-link {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: var(--ink);
+  font: 600 13px var(--font); padding: 5px 10px; border-radius: 999px; border: var(--bw) solid var(--line); background: #fff;
+}
+.gh-link:hover { background: var(--blue-50); box-shadow: 2px 2px 0 var(--blue); }
+.site-foot {
+  max-width: 980px; margin: 56px auto 0; padding: 18px; display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 14px; border: var(--bw) solid var(--line); border-radius: var(--radius);
+  background: var(--paper); box-shadow: var(--shadow);
+}
+.foot-author { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.foot-author > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.foot-author span { color: var(--muted); font-size: 13px; }
+.foot-author a { color: var(--blue-600); }
+.foot-avatar img { display: block; width: 44px; height: 44px; border-radius: 50%; border: var(--bw) solid var(--line); background: #fff; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.foot-links .btn { font-size: 13px; padding: 7px 12px; }
+.seo-fallback { max-width: 760px; margin: 0 auto; }
+@media (max-width: 560px) {
+  .gh-link span { display: none; }
+  .gh-link { padding: 6px; }
+}

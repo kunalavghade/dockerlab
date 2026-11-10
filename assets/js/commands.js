@@ -1,5 +1,5 @@
 // Command reference pages: #/commands (searchable index) and #/commands/<id> (detail + live lab).
-import { h, escapeHtml, copyText, store } from './dom.js';
+import { h, escapeHtml, copyText, store, setPage } from './dom.js';
 import { commandBlock } from './components.js';
 import { createTerminal } from './terminal.js';
 import { createStateView } from './stateview.js';
@@ -60,7 +60,7 @@ export const explainParts = (line) => {
 const card = (r) => h('a', { class: 'ref-card', href: `#/commands/${r.id}` }, h('code', {}, r.cmd), h('span', {}, r.summary));
 
 export const renderCommandIndex = (view, query = '') => {
-  document.title = 'Docker command reference — Docker Lab';
+  setPage(`All ${REFERENCE.length} Docker commands explained — Docker command reference | Docker Lab`, `Every Docker command explained with syntax, options, examples, common errors and a live lab you can type into: containers, images, buildx, volumes, networks, Compose, Swarm and more.`);
   const grid = h('div', {});
   const count = h('span', { class: 'cs-count' });
   let mode = store.get('dl-ref-mode', 'path');
@@ -108,7 +108,7 @@ export const renderCommandIndex = (view, query = '') => {
 export const renderCommandPage = (view, id) => {
   const r = refById(id);
   if (!r) return false;
-  document.title = `${r.cmd} — Docker command reference`;
+  setPage(`${r.cmd} — usage, options and examples | Docker Lab`, `${r.summary} Syntax, every important option, examples, common errors and a live lab for ${r.cmd}.`);
   const idx = PATH_ORDER.indexOf(r.id);
   const prev = refById(PATH_ORDER[idx - 1]), next = refById(PATH_ORDER[idx + 1]);
   const group = REF_GROUPS.find((g) => g.name === r.group);

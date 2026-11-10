@@ -121,3 +121,19 @@ export const removeAnimated = async (el) => {
 };
 
 export const randomHex = (n = 12) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
+
+let siteDescription; // read once, before the first page changes it
+const setMeta = (selector, value) => document.querySelectorAll(selector).forEach((m) => m.setAttribute('content', value));
+
+/** Sets the tab title and the description and share tags for the current page. */
+export const setPage = (title, description) => {
+  siteDescription ??= document.querySelector('meta[name="description"]')?.content || '';
+  description ||= siteDescription;
+  document.title = title;
+  setMeta('meta[name="description"]', description);
+  setMeta('meta[property="og:title"], meta[name="twitter:title"]', title);
+  setMeta('meta[property="og:description"], meta[name="twitter:description"]', description);
+};
+
+export const GITHUB_PROFILE = 'https://github.com/kunalavghade';
+export const GITHUB_REPO = `${GITHUB_PROFILE}/dockerlab`;
