@@ -5,8 +5,9 @@ import { ANIMATIONS } from './animations.js';
 import './animations-more.js';
 import { commandBlock, fileBlock, quizBlock } from './components.js';
 import { renderPlayground } from './playground.js';
-import { renderCommandIndex, renderCommandPage, commandSidebar, entryFor } from './commands.js';
-import { REFERENCE } from './reference.js';
+import { renderCommandIndex, renderCommandPage } from './commands.js';
+import { REFERENCE, refById, entryFor } from './reference.js';
+import { lessonCommands, homeLesson, linkCommands } from './sync.js';
 
 const view = document.getElementById('view');
 const sidebar = document.getElementById('sidebar');
@@ -28,27 +29,30 @@ const renderProgress = () => {
   pill.style.setProperty('--p', `${pct}%`);
 };
 
+// One sidebar for lessons and commands: the open lesson lists the commands it uses.
 const renderSidebar = (activeId = currentLessonId()) => {
-  if (location.hash.startsWith('#/commands')) {
-    return sidebar.replaceChildren(
-      h('div', { class: 'side-level side-extra' }, h('a', { class: 'side-link', href: '#/' }, h('span', { class: 'side-num' }, '←'), 'Lessons'), h('a', { class: `side-link ${activeId === 'commands' ? 'active' : ''}`, href: '#/commands' }, h('span', { class: 'side-num' }, '≡'), `All ${REFERENCE.length} commands`)),
-      ...commandSidebar(activeId));
-  }
+  const onCommand = location.hash.startsWith('#/commands/') && refById(activeId);
+  const openLesson = onCommand ? homeLesson(activeId)?.id : activeId;
   const levels = LEVELS.map((lvl) => {
     const lessons = LESSONS.filter((l) => l.level === lvl.id);
     const count = lessons.filter((l) => done.has(l.id)).length;
     return h('div', { class: 'side-level' },
       h('h4', {}, h('span', {}, lvl.title), h('span', {}, `${count}/${lessons.length}`)),
-      lessons.map((l) => h('a', {
-        class: `side-link ${l.id === activeId ? 'active' : ''} ${done.has(l.id) ? 'done' : ''}`,
-        href: `#/lesson/${l.id}`,
-      }, h('span', { class: 'side-num' }, done.has(l.id) ? '✓' : LESSONS.indexOf(l) + 1), l.title)));
+      lessons.map((l) => [
+        h('a', {
+          class: `side-link ${l.id === activeId ? 'active' : ''} ${l.id === openLesson && onCommand ? 'open' : ''} ${done.has(l.id) ? 'done' : ''}`,
+          href: `#/lesson/${l.id}`,
+        }, h('span', { class: 'side-num' }, done.has(l.id) ? '✓' : LESSONS.indexOf(l) + 1), l.title),
+        l.id === openLesson && lessonCommands.get(l.id).length ? h('div', { class: 'side-cmds' },
+          lessonCommands.get(l.id).map((cid) => h('a', { class: `side-cmd ${cid === activeId ? 'active' : ''}`, href: `#/commands/${cid}` }, refById(cid).cmd.replace(/^docker /, '')))) : null,
+      ]));
   });
   sidebar.replaceChildren(...levels,
     h('div', { class: 'side-level side-extra' },
-      h('a', { class: `side-link ${activeId === 'commands' ? 'active' : ''}`, href: '#/commands' }, h('span', { class: 'side-num' }, '📚'), `Command reference (${REFERENCE.length})`),
+      h('a', { class: `side-link ${activeId === 'commands' || onCommand ? 'active' : ''}`, href: '#/commands' }, h('span', { class: 'side-num' }, '📚'), `Command reference (${REFERENCE.length})`),
       h('a', { class: `side-link ${activeId === 'playground' ? 'active' : ''}`, href: '#/playground' }, h('span', { class: 'side-num' }, '▶'), 'Playground'),
       h('a', { class: `side-link ${activeId === 'cheatsheet' ? 'active' : ''}`, href: '#/cheatsheet' }, h('span', { class: 'side-num' }, '≡'), 'Cheat sheet')));
+  sidebar.querySelector('.side-cmd.active, .side-link.active')?.scrollIntoView({ block: 'nearest' });
 };
 
 const setTopNav = (key) => document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === key));
@@ -87,16 +91,16 @@ const renderHome = () => {
 };
 
 const BLOCKS = {
-  p: (html) => h('p', { html }),
+  p: (html) => h('p', { html: linkCommands(html) }),
   h: (text) => h('h2', {}, text),
   h3: (text) => h('h3', {}, text),
-  list: (items) => h('ul', { class: 'points' }, items.map((html) => h('li', { html }))),
-  tip: (html) => h('div', { class: 'callout' }, h('span', { class: 'ico' }, '💡'), h('p', { html })),
-  warn: (html) => h('div', { class: 'callout warn' }, h('span', { class: 'ico' }, '⚠️'), h('p', { html })),
-  analogy: (html) => h('div', { class: 'callout analogy' }, h('span', { class: 'ico' }, '🚢'), h('p', { html })),
-  cmd: commandBlock,
+  list: (items) => h('ul', { class: 'points' }, items.map((html) => h('li', { html: linkCommands(html) }))),
+  tip: (html) => h('div', { class: 'callout' }, h('span', { class: 'ico' }, '💡'), h('p', { html: linkCommands(html) })),
+  warn: (html) => h('div', { class: 'callout warn' }, h('span', { class: 'ico' }, '⚠️'), h('p', { html: linkCommands(html) })),
+  analogy: (html) => h('div', { class: 'callout analogy' }, h('span', { class: 'ico' }, '🚢'), h('p', { html: linkCommands(html) })),
+  cmd: (spec) => commandBlock({ ...spec, refId: entryFor(spec.parts.map((p) => p[0]).join(' '))?.id }),
   file: fileBlock,
-  table: ({ head, rows }) => h('table', { class: 'ref' }, h('thead', {}, h('tr', {}, head.map((c) => h('th', {}, c)))), h('tbody', {}, rows.map((r) => h('tr', {}, r.map((c) => h('td', { html: c })))))),
+  table: ({ head, rows }) => h('table', { class: 'ref' }, h('thead', {}, h('tr', {}, head.map((c) => h('th', {}, c)))), h('tbody', {}, rows.map((r) => h('tr', {}, r.map((c) => h('td', { html: linkCommands(c) })))))),
   compare: ({ a, b }) => h('div', { class: 'compare' }, [a, b].map((side) => h('div', {}, h('h4', {}, side.title), h('ul', {}, side.items.map((t) => h('li', {}, t)))))),
   anim: (key) => {
     const mount = h('div', {});
@@ -113,14 +117,14 @@ const BLOCKS = {
   },
 };
 
-// Every reference page that names this lesson, as links to the full command docs and labs.
-const lessonCommands = (lessonId) => {
-  const refs = REFERENCE.filter((r) => r.lesson === lessonId);
-  if (!refs.length) return null;
-  return h('section', { class: 'lesson-refs' },
-    h('h3', {}, '📚 Every command from this lesson, in depth'),
-    h('p', {}, 'Each page explains every option and has its own live lab.'),
-    h('div', { class: 'chips' }, refs.map((r) => h('a', { class: 'chip light', href: `#/commands/${r.id}` }, r.cmd))));
+// The commands this lesson uses (found by sync.js), each linked to its reference page and lab.
+const lessonCommandBox = (lessonId) => {
+  const ids = lessonCommands.get(lessonId);
+  if (!ids.length) return null;
+  return h('div', { class: 'learn-box cmd-box' },
+    h('h4', {}, `Commands in this lesson · ${ids.length}`),
+    h('div', { class: 'chips' }, ids.map((id) => h('a', { class: `chip ${homeLesson(id)?.id === lessonId ? 'blue' : 'light'}`, href: `#/commands/${id}`, title: refById(id).summary }, refById(id).cmd))),
+    h('p', {}, 'Dark blue = taught here. Each one opens a full page with every option and a live lab. Commands in the text below are links too.'));
 };
 
 const renderLesson = (id) => {
@@ -140,9 +144,10 @@ const renderLesson = (id) => {
       h('div', { class: 'meta' }, h('span', { class: `badge ${l.level}` }, l.level), h('span', {}, `Lesson ${idx + 1} of ${LESSONS.length}`), h('span', {}, `· ${l.minutes} min`)),
       h('h1', {}, l.title),
       h('p', { class: 'lead' }, l.summary),
-      h('div', { class: 'learn-box' }, h('h4', {}, 'You will learn'), h('ul', {}, l.learn.map((t) => h('li', {}, t))))),
+      h('div', { class: 'learn-grid' },
+        h('div', { class: 'learn-box' }, h('h4', {}, 'You will learn'), h('ul', {}, l.learn.map((t) => h('li', {}, t)))),
+        lessonCommandBox(l.id))),
     l.blocks.map(([type, data]) => (BLOCKS[type] ? BLOCKS[type](data) : null)),
-    lessonCommands(l.id),
     quizBlock(l.quiz, () => { if (!done.has(l.id)) { markDone(l.id); syncComplete(); } }),
     h('div', { class: 'complete-row' }, h('span', {}, 'Answer every quiz question correctly to complete the lesson automatically — or mark it yourself.'), completeBtn),
     h('nav', { class: 'lesson-foot' },

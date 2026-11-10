@@ -10,7 +10,7 @@ const tokenKind = (tok, i, seenFlag) => {
 };
 
 /**
- * spec: { title?, parts: [[token, explanation, kind?], ...], note?, try?: boolean }
+ * spec: { title?, parts: [[token, explanation, kind?], ...], note?, try?: boolean, refId?: reference page id }
  */
 export const commandBlock = (spec) => {
   const cmd = spec.parts.map((p) => p[0]).join(' ');
@@ -35,6 +35,7 @@ export const commandBlock = (spec) => {
   const bar = h('div', { class: 'cmd-bar' },
     h('span', { class: 'title' }, spec.title || 'Command — hover or click each part'),
     h('span', { class: 'spacer' }),
+    spec.refId && h('a', { class: 'btn btn-sm', href: `#/commands/${spec.refId}`, title: 'Every option, more examples and a live lab' }, '📚 Reference'),
     spec.try && h('a', { class: 'btn btn-sm', href: `#/playground?cmd=${encodeURIComponent(cmd)}` }, '▶ Try in playground'),
     h('button', { class: 'btn btn-sm', onclick: () => copyText(cmd) }, 'Copy'),
   );

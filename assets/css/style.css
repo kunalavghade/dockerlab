@@ -630,6 +630,22 @@ p code, li code, .callout code { overflow-wrap: anywhere; }
 .ref-lab-head p { margin: 0 0 10px; color: var(--muted); }
 .ref-lab .cmd-hints { margin-bottom: 12px; border: var(--bw) solid var(--line); border-radius: 10px; background: #fff; }
 .side-link.mono { font: 13px var(--mono); }
+.side-link.open { border-color: var(--line); background: #fff; }
+.side-cmds { display: grid; gap: 1px; margin: 2px 0 8px 22px; padding-left: 10px; border-left: var(--bw) solid var(--blue-300); }
+.side-cmd { font: 12.5px var(--mono); color: var(--ink); text-decoration: none; padding: 3px 8px; border-radius: 6px; border: 1.2px solid transparent; overflow-wrap: anywhere; }
+.side-cmd:hover { background: #fff; border-color: var(--soft-line); }
+.side-cmd.active { background: var(--blue); color: #fff; border-color: var(--line); font-weight: 700; }
+.learn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+.learn-grid .learn-box { margin: 0; }
+.cmd-box .chips { margin-bottom: 8px; }
+.cmd-box p { margin: 0; font-size: 13px; color: var(--muted); }
+.cmd-box ul { margin: 0; }
+a.cmd-link { text-decoration: none; }
+a.cmd-link code { border-bottom: 1.5px dashed var(--blue) !important; cursor: pointer; }
+a.cmd-link:hover code { background: var(--blue-100) !important; }
+.ref-tools { display: grid; gap: 10px; margin-bottom: 4px; }
+.seg { display: flex; gap: 6px; }
+.ref-also { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
 
 
 /* ---------- Debugging, snapshots, multi-arch, contexts, stacks ---------- */

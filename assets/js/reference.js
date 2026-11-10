@@ -34,3 +34,14 @@ export const REFERENCE = [...CONTAINER_REFS, ...IMAGE_REFS, ...RESOURCE_REFS, ..
   .map((r) => ({ setup: [], args: [], flags: [], errors: [], related: [], aliases: [], ...r, id: refId(r.cmd) }));
 
 export const refById = (id) => REFERENCE.find((r) => r.id === id);
+
+// Finds the entry whose command (or alias) is the longest prefix of a command line.
+export const entryFor = (line) => {
+  const text = String(line).replace(/\s+/g, ' ');
+  const at = text.search(/(^|\s)docker\s/); // "echo x | docker secret create …" → the docker part
+  if (at < 0) return null;
+  // Global flags (-H, --context) sit between "docker" and the command.
+  const norm = text.slice(at).trim().replace(/^docker (?:(?:-H|--host|-c|--context) \S+ )+/, 'docker ');
+  return REFERENCE.filter((r) => [r.cmd, ...r.aliases].some((c) => norm === c || norm.startsWith(`${c} `)))
+    .sort((a, b) => b.cmd.length - a.cmd.length)[0] || null;
+};

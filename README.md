@@ -17,6 +17,7 @@ An interactive website that teaches Docker from zero to advanced. Every concept 
 - **File explainer:** step through a Dockerfile, `compose.yaml`, `.dockerignore` or `.env` one line at a time.
 - **Quizzes** that mark a lesson complete. Progress is saved in your browser.
 - **Playground:** a simulated Docker engine with a terminal, a live view of images, containers, networks and volumes, and 15 challenges. It supports pipes (`| grep`, `| jq`), `$(…)`, `&&`, redirects, shells inside containers (`docker exec -it web sh`), Compose, Swarm across several machines (`ssh worker-1 …`), contexts, buildx and registries.
+- **Lessons and commands stay in sync:** each lesson lists the commands it uses, every command in the lesson text links to its reference page, and each command page shows its lesson, the other commands in that lesson and where else it is used. The sidebar is the same everywhere, and the reference can follow the learning path or group by topic.
 - **Cheat sheet:** a searchable list of commands. Click one to copy it.
 
 ## Run locally
@@ -47,6 +48,7 @@ assets/js/components.js Command explainer, file explainer, scene frame, quiz
 assets/js/animations-more.js Animations for debugging, snapshots, buildx, contexts, stacks
 assets/js/reference.js  Command reference index (entries live in assets/js/ref/)
 assets/js/commands.js   Command reference pages and token explainer
+assets/js/sync.js       Links lessons and commands (found from the commands each lesson uses)
 assets/js/terminal.js   Terminal UI bound to the simulated engine
 assets/js/stateview.js  Live picture of engine state
 assets/js/playground.js Playground page and challenges
